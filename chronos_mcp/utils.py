@@ -87,6 +87,9 @@ def validate_rrule(rrule: str) -> Tuple[bool, Optional[str]]:
     """
     Validate RRULE syntax according to RFC 5545.
 
+    Delegates to RRuleValidator for canonical validation.
+    Preserves empty-input behavior for backward compatibility.
+
     Args:
         rrule: The RRULE string to validate
 
@@ -96,68 +99,6 @@ def validate_rrule(rrule: str) -> Tuple[bool, Optional[str]]:
     if not rrule:
         return True, None
 
-    try:
-        # Basic validation - must have FREQ
-        if not rrule.startswith("FREQ="):
-            return False, "RRULE must start with FREQ="
+    from .rrule import RRuleValidator
 
-        # Parse components
-        parts = rrule.split(";")
-        rules = {}
-
-        for part in parts:
-            if "=" not in part:
-                return False, f"Invalid RRULE component: {part}"
-
-            key, value = part.split("=", 1)
-            rules[key] = value
-
-        # Validate FREQ is present and valid
-        if "FREQ" not in rules:
-            return False, "FREQ is required in RRULE"
-
-        valid_freqs = ["DAILY", "WEEKLY", "MONTHLY", "YEARLY"]
-        if rules["FREQ"] not in valid_freqs:
-            return (
-                False,
-                f"Invalid FREQ value: {rules['FREQ']}. Must be one of {valid_freqs}",
-            )
-
-        # Validate other common components
-        if "INTERVAL" in rules:
-            try:
-                interval = int(rules["INTERVAL"])
-                if interval < 1:
-                    return False, "INTERVAL must be a positive integer"
-            except ValueError:
-                return False, "INTERVAL must be an integer"
-
-        if "COUNT" in rules:
-            try:
-                count = int(rules["COUNT"])
-                if count < 1:
-                    return False, "COUNT must be a positive integer"
-            except ValueError:
-                return False, "COUNT must be an integer"
-
-        if "UNTIL" in rules:
-            # Basic format check for UNTIL (should be datetime)
-            until = rules["UNTIL"]
-            if not (len(until) >= 8 and until[0:8].isdigit()):
-                return False, "UNTIL must be in YYYYMMDD or YYYYMMDDTHHMMSSZ format"
-
-        if "BYDAY" in rules:
-            # Validate day abbreviations
-            valid_days = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"]
-            days = rules["BYDAY"].split(",")
-            for day in days:
-                # Remove position prefix if present (e.g., 2MO for 2nd Monday)
-                day_abbr = day.lstrip("-+0123456789")
-                if day_abbr not in valid_days:
-                    return False, f"Invalid day abbreviation: {day}"
-
-        # If we get here, basic validation passed
-        return True, None
-
-    except Exception as e:
-        return False, f"Error parsing RRULE: {str(e)}"
+    return RRuleValidator.validate_rrule(rrule)

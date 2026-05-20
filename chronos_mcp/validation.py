@@ -308,9 +308,19 @@ class InputValidator:
 
     @classmethod
     def validate_rrule(cls, rrule: str) -> str:
-        """Validate recurrence rule."""
+        """Validate recurrence rule.
+
+        Security sanitization (strip, uppercase, length check) followed
+        by basic format validation. Full safety validation (COUNT/UNTIL)
+        happens at the business logic layer via RRuleValidator.
+        """
+        # Security: sanitize input
         rrule = rrule.strip().upper()
 
+        if len(rrule) > 500:
+            raise ValidationError("RRULE too complex (exceeds 500 characters)")
+
+        # Basic format validation
         if not rrule.startswith("FREQ="):
             raise ValidationError("RRULE must start with FREQ=")
 
@@ -318,9 +328,6 @@ class InputValidator:
         freq_match = re.match(r"FREQ=(\w+)", rrule)
         if not freq_match or freq_match.group(1) not in valid_freqs:
             raise ValidationError(f"Invalid frequency. Must be one of: {valid_freqs}")
-
-        if len(rrule) > 500:
-            raise ValidationError("RRULE too complex (exceeds 500 characters)")
 
         return rrule
 

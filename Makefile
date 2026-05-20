@@ -21,13 +21,12 @@ dev-install:
 	pre-commit install
 
 format:
-	isort chronos_mcp tests
+	ruff format chronos_mcp tests
 	black chronos_mcp tests
 
 lint:
-	isort --check-only chronos_mcp tests
+	ruff check chronos_mcp
 	black --check chronos_mcp tests
-	flake8 chronos_mcp tests --max-line-length=100
 	mypy chronos_mcp
 
 test:

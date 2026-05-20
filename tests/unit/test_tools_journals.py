@@ -268,7 +268,9 @@ class TestJournalTools:
     async def test_list_journals_limit_type_error(self, setup_managers):
         """Test list_journals handles TypeError in limit conversion"""
         result = await list_journals.fn(
-            calendar_uid="cal-123", account=None, limit={}  # TypeError when int({})
+            calendar_uid="cal-123",
+            account=None,
+            limit={},  # TypeError when int({})
         )
 
         assert result["journals"] == []

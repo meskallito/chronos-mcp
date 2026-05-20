@@ -85,7 +85,6 @@ class TestCredentialSecurity:
             patch("chronos_mcp.credentials.keyring") as mock_keyring,
             patch("chronos_mcp.credentials.keyring.errors") as mock_errors,
         ):
-
             # Create a proper PasswordDeleteError exception
             class MockPasswordDeleteError(Exception):
                 pass

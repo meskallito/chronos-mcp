@@ -202,7 +202,8 @@ class BulkOperationManager:
                             break
                         elif options.mode == BulkOperationMode.ATOMIC:
                             failed_rollbacks = self._rollback_created_events(
-                                calendar_uid, [uid for uid in created_uids if uid is not None]
+                                calendar_uid,
+                                [uid for uid in created_uids if uid is not None],
                             )
                             result.successful = 0
                             result.failed = len(events)
@@ -290,7 +291,8 @@ class BulkOperationManager:
                             break
                         elif options.mode == BulkOperationMode.ATOMIC:
                             failed_rollbacks = self._rollback_created_tasks(
-                                calendar_uid, [uid for uid in created_uids if uid is not None]
+                                calendar_uid,
+                                [uid for uid in created_uids if uid is not None],
                             )
                             result.successful = 0
                             result.failed = len(tasks)
@@ -375,7 +377,8 @@ class BulkOperationManager:
                             break
                         elif options.mode == BulkOperationMode.ATOMIC:
                             failed_rollbacks = self._rollback_created_journals(
-                                calendar_uid, [uid for uid in created_uids if uid is not None]
+                                calendar_uid,
+                                [uid for uid in created_uids if uid is not None],
                             )
                             result.successful = 0
                             result.failed = len(journals)
@@ -759,7 +762,10 @@ class BulkOperationManager:
         return failed_rollbacks
 
     def bulk_delete_events(
-        self, calendar_uid: str, event_uids: List[str], options: BulkOptions | None = None
+        self,
+        calendar_uid: str,
+        event_uids: List[str],
+        options: BulkOptions | None = None,
     ) -> BulkResult:
         """Delete multiple events efficiently."""
         if options is None:
@@ -796,7 +802,6 @@ class BulkOperationManager:
                         )
                         result.successful += 1
                     except Exception as e:
-
                         result.results.append(
                             OperationResult(
                                 index=batch_start + idx,
@@ -818,7 +823,10 @@ class BulkOperationManager:
         return result
 
     def bulk_delete_tasks(
-        self, calendar_uid: str, task_uids: List[str], options: BulkOptions | None = None
+        self,
+        calendar_uid: str,
+        task_uids: List[str],
+        options: BulkOptions | None = None,
     ) -> BulkResult:
         """Delete multiple tasks efficiently."""
         if options is None:
@@ -855,7 +863,6 @@ class BulkOperationManager:
                         )
                         result.successful += 1
                     except Exception as e:
-
                         result.results.append(
                             OperationResult(
                                 index=batch_start + idx,
@@ -877,7 +884,10 @@ class BulkOperationManager:
         return result
 
     def bulk_delete_journals(
-        self, calendar_uid: str, journal_uids: List[str], options: BulkOptions | None = None
+        self,
+        calendar_uid: str,
+        journal_uids: List[str],
+        options: BulkOptions | None = None,
     ) -> BulkResult:
         """Delete multiple journals efficiently."""
         if options is None:
@@ -914,7 +924,6 @@ class BulkOperationManager:
                         )
                         result.successful += 1
                     except Exception as e:
-
                         result.results.append(
                             OperationResult(
                                 index=batch_start + idx,

@@ -880,7 +880,9 @@ class TestJournalEdgeCases:
         mock_caldav_event.data = self._create_simple_journal_ical()
 
         result = journal_manager._parse_caldav_journal(
-            mock_caldav_event, "cal-123", None  # No account_alias provided
+            mock_caldav_event,
+            "cal-123",
+            None,  # No account_alias provided
         )
 
         assert result is not None
@@ -894,7 +896,9 @@ class TestJournalEdgeCases:
         mock_caldav_event.data = self._create_simple_journal_ical()
 
         result = journal_manager._parse_caldav_journal(
-            mock_caldav_event, "cal-123", None  # No account_alias provided
+            mock_caldav_event,
+            "cal-123",
+            None,  # No account_alias provided
         )
 
         assert result is not None

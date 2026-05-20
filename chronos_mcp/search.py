@@ -162,7 +162,9 @@ def search_components(
 
 
 def calculate_relevance_score(
-    component: Dict[str, Any], options: SearchOptions, current_time: datetime | None = None
+    component: Dict[str, Any],
+    options: SearchOptions,
+    current_time: datetime | None = None,
 ) -> float:
     """Calculate relevance score for search ranking."""
     if current_time is None:

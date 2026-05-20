@@ -45,7 +45,6 @@ class TestThreadSafety:
             patch("chronos_mcp.accounts.DAVClient") as mock_dav_client,
             patch("chronos_mcp.accounts.get_credential_manager") as mock_cred_mgr,
         ):
-
             # Setup mocks
             mock_client = Mock()
             mock_principal = Mock()
@@ -115,7 +114,6 @@ class TestThreadSafety:
             patch("chronos_mcp.accounts.DAVClient") as mock_dav_client,
             patch("chronos_mcp.accounts.get_credential_manager") as mock_cred_mgr,
         ):
-
             # Setup mocks
             mock_client = Mock()
             mock_principal = Mock()
@@ -163,7 +161,6 @@ class TestThreadSafety:
             patch("chronos_mcp.accounts.DAVClient") as mock_dav_client,
             patch("chronos_mcp.accounts.get_credential_manager") as mock_cred_mgr,
         ):
-
             # Setup mocks for multiple accounts
             mock_client = Mock()
             mock_principal = Mock()
@@ -228,7 +225,6 @@ class TestThreadSafety:
             patch("chronos_mcp.accounts.DAVClient") as mock_dav_client,
             patch("chronos_mcp.accounts.get_credential_manager") as mock_cred_mgr,
         ):
-
             # Setup mock to fail on first call, succeed on others
             call_count = 0
 
