@@ -119,7 +119,7 @@ class TestGetItemWithFallback:
 
         assert result == mock_task_item
         mock_calendar.event_by_uid.assert_called_once()
-        mock_calendar.todos.assert_called_once()
+        mock_calendar.todos.assert_called_once_with(include_completed=True)
 
     def test_journal_method2_fallback(self, mock_calendar, mock_journal_item):
         """Test journal found using fallback search (Method 2)"""

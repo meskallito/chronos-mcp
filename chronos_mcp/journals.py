@@ -69,6 +69,8 @@ class JournalManager:
 
             journal.add("uid", journal_uid)
             journal.add("summary", summary)
+            if dtstart.tzinfo is not None and dtstart.tzinfo != timezone.utc:
+                dtstart = dtstart.astimezone(timezone.utc)
             journal.add("dtstart", dtstart)
             journal.add("dtstamp", datetime.now(timezone.utc))
 
@@ -301,6 +303,8 @@ class JournalManager:
                     del existing_journal["DESCRIPTION"]
 
             if dtstart is not None:
+                if dtstart.tzinfo is not None and dtstart.tzinfo != timezone.utc:
+                    dtstart = dtstart.astimezone(timezone.utc)
                 if "DTSTART" in existing_journal:
                     del existing_journal["DTSTART"]
                 existing_journal.add("DTSTART", dtstart)
