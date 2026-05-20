@@ -550,4 +550,4 @@ graph TB
 
 ## Architectural Decisions
 
-See [DESIGN_DECISIONS.md](./DESIGN_DECISIONS.md) for detailed rationale behind key architectural choices.
+See [docs/adr/](./adr/) for detailed rationale behind key architectural choices.

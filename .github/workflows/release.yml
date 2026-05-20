@@ -81,12 +81,11 @@ jobs:
         verify-metadata: true
         skip-existing: true
 
-    - name: Notify Discord
+    - name: Report release result
       if: always()
       run: |
         if [ "${{ job.status }}" == "success" ]; then
-          echo "✅ Release ${{ steps.changelog.outputs.VERSION }} published successfully!"
+          echo "Release ${{ steps.changelog.outputs.VERSION }} published successfully"
         else
-          echo "❌ Release ${{ steps.changelog.outputs.VERSION }} failed!"
+          echo "Release ${{ steps.changelog.outputs.VERSION }} failed"
         fi
-        # Add Discord webhook notification here

@@ -121,10 +121,10 @@ Closes #123
 * Always sanitize error messages shown to users
 * Validate all user inputs
 * Follow OWASP guidelines for web security
-* Report security vulnerabilities to security@chronos-mcp.org
+* Report security vulnerabilities to contribute@democratize.technology
 
 ## Questions?
 
-Feel free to open an issue with the `question` label or reach out in our [Discord community](https://discord.gg/chronos-mcp).
+Feel free to open an issue with the `question` label or start a discussion on [GitHub Discussions](https://github.com/democratize-technology/chronos-mcp/discussions).
 
 Thank you for contributing! 🎉

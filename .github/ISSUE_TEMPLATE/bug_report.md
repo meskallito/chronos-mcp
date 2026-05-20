@@ -30,7 +30,7 @@ Please paste any error messages or logs here
 ## Environment (please complete the following information):
 - OS: [e.g. macOS 14.5, Ubuntu 22.04]
 - Python version: [e.g. 3.11.5]
-- Chronos MCP version: [e.g. 0.2.0]
+- Chronos MCP version: [e.g. 2.0.0]
 - CalDAV server: [e.g. Nextcloud 27, Radicale 3.0]
 
 ## Additional context

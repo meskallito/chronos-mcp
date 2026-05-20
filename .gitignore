@@ -155,9 +155,6 @@ accounts.json
 
 # Test files
 # test_*.py  # Commented out to allow test files in tests/ directory
-!test_imports.py
-!test_fastmcp.py
-!test_minimal_server.py
 
 # Temporary files
 *.tmp

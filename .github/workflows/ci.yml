@@ -127,8 +127,7 @@ jobs:
     if: always()
 
     steps:
-    - name: Send Discord notification
+    - name: Report pipeline result
       if: github.event_name == 'push'
       run: |
         echo "CI/CD pipeline completed for ${{ github.ref }}"
-        # Add Discord webhook notification here

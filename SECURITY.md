@@ -6,9 +6,9 @@ Chronos MCP takes security seriously. This document outlines our current securit
 
 ## 🔐 Secure Credential Storage
 
-As of v0.2.0, Chronos MCP uses system keyring for secure password storage:
+As of v2.0.0, Chronos MCP uses system keyring for secure password storage:
 - **macOS**: Keychain Access
-- **Windows**: Windows Credential Locker  
+- **Windows**: Windows Credential Locker
 - **Linux**: Secret Service (GNOME Keyring, KWallet, etc.)
 
 Passwords are no longer stored in plain text. For environments without keyring support (containers, SSH sessions), the system falls back to configuration file storage with clear warnings.
@@ -23,12 +23,12 @@ python scripts/migrate_to_keyring.py
 ### 1. Input Validation (In Progress)
 - **Issue**: Enhanced input validation for CalDAV URLs and user inputs
 - **Impact**: Potential for injection attacks or malformed requests
-- **Status**: Basic validation implemented, comprehensive validation planned for v0.3.0
+- **Status**: Basic validation implemented, comprehensive validation planned for v2.1.0
 
 ### 2. Rate Limiting (Planned)
 - **Issue**: No protection against rapid API calls
 - **Impact**: Potential for resource exhaustion
-- **Mitigation**: Planned for v0.3.0
+- **Mitigation**: Planned for v2.1.0
 
 ## Reporting Security Vulnerabilities
 
@@ -40,14 +40,14 @@ Please report security vulnerabilities via:
 
 ## Security Roadmap
 
-### Version 0.2.0 (Current Release) ✅
+### Version 2.0.0 (Current Release)
 - [x] Implement keyring support for credential storage
 - [x] Implement secure credential migration tool
 - [x] Add basic input validation
 - [x] XSS and injection prevention
 - [x] Path traversal protection
 
-### Version 0.3.0 (Q2 2025)
+### Version 2.1.0 (Upcoming)
 - [ ] Enhanced input validation for all user inputs
 - [ ] Add rate limiting
 - [ ] Implement API authentication
@@ -55,7 +55,7 @@ Please report security vulnerabilities via:
 
 ## Best Practices
 
-1. **Credential Security**: Use system keyring (automatic in v0.2.0+)
+1. **Credential Security**: Use system keyring (automatic in v2.0.0+)
 2. **File Permissions**: Ensure `~/.chronos/` has restrictive permissions
 3. **Network Security**: Use HTTPS for CalDAV connections when possible
 4. **Account Security**: Use app-specific passwords where supported

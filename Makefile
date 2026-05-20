@@ -1,4 +1,4 @@
-.PHONY: help install dev-install format lint test test-unit test-integration coverage clean build publish
+.PHONY: help install dev-install format lint test test-unit coverage clean build publish
 
 help:
 	@echo "Available commands:"
@@ -8,7 +8,6 @@ help:
 	@echo "  make lint            Run all linters"
 	@echo "  make test            Run all tests"
 	@echo "  make test-unit       Run unit tests only"
-	@echo "  make test-integration Run integration tests only"
 	@echo "  make coverage        Run tests with coverage report"
 	@echo "  make clean           Clean build artifacts"
 	@echo "  make build           Build distribution packages"
@@ -23,11 +22,11 @@ dev-install:
 
 format:
 	isort chronos_mcp tests
-	black --target-version py311 chronos_mcp tests
+	black chronos_mcp tests
 
 lint:
 	isort --check-only chronos_mcp tests
-	black --target-version py311 --check chronos_mcp tests
+	black --check chronos_mcp tests
 	flake8 chronos_mcp tests --max-line-length=100
 	mypy chronos_mcp
 
@@ -36,9 +35,6 @@ test:
 
 test-unit:
 	pytest tests/unit/ -v
-
-test-integration:
-	pytest tests/integration/ -v
 
 coverage:
 	pytest tests/ --cov=chronos_mcp --cov-report=term-missing --cov-report=html --cov-report=xml
@@ -65,6 +61,3 @@ publish: build
 # Development helpers
 server:
 	python -m chronos_mcp
-
-radicale:
-	python -m radicale --config tests/fixtures/radicale.conf
