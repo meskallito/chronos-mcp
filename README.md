@@ -4,6 +4,7 @@
 [![FastMCP 2.0+](https://img.shields.io/badge/FastMCP-2.0+-green.svg)](https://github.com/jlowin/fastmcp)
 [![CalDAV](https://img.shields.io/badge/CalDAV-RFC4791-orange.svg)](https://tools.ietf.org/html/rfc4791)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Tests](https://github.com/democratize-technology/chronos-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/democratize-technology/chronos-mcp/actions/workflows/test.yml)
 
 A comprehensive Model Context Protocol (MCP) server for CalDAV calendar management, built with FastMCP 2.0. Chronos provides advanced calendar and event management capabilities with multi-account support.
 
@@ -35,8 +36,6 @@ A comprehensive Model Context Protocol (MCP) server for CalDAV calendar manageme
   - RFC-compliant validation ✅
 - **Task Management**: Full VTODO support ✅
 - **Journal Entries**: Full VJOURNAL support ✅
-- **Import/Export**: iCalendar format support (coming soon)
-- **Sync Capabilities**: Calendar synchronization between accounts (coming soon)
 
 
 ## 📋 Task Management (VTODO)
@@ -49,6 +48,14 @@ Chronos MCP provides comprehensive support for CalDAV tasks:
 - **Create subtasks** using related_to relationships
 - **Bulk operations** for efficient task management
 
+**Available tools:**
+- `create_task` — Create a task with summary, due date, priority, description
+- `list_tasks` — List tasks in a calendar, optionally filtering by status
+- `update_task` — Partial update of task fields (status, priority, progress, etc.)
+- `delete_task` — Delete a task by UID
+- `bulk_create_tasks` — Create multiple tasks in parallel
+- `bulk_delete_tasks` — Delete multiple tasks in parallel
+
 ```bash
 # Example: Create a task
 mcp call create_task '{
@@ -59,7 +66,6 @@ mcp call create_task '{
 }'
 ```
 
-
 ## 📓 Journal Entries (VJOURNAL)
 
 Keep detailed records with CalDAV journal entries:
@@ -68,6 +74,14 @@ Keep detailed records with CalDAV journal entries:
 - **Link related entries** using related_to relationships
 - **Organize with categories** for better searchability
 - **Update and manage** existing journal entries
+
+**Available tools:**
+- `create_journal` — Create a journal entry with summary and description
+- `list_journals` — List journal entries in a calendar
+- `update_journal` — Partial update of journal fields
+- `delete_journal` — Delete a journal entry by UID
+- `bulk_create_journals` — Create multiple journal entries in parallel
+- `bulk_delete_journals` — Delete multiple journal entries in parallel
 
 ```bash
 # Example: Create a journal entry
@@ -242,6 +256,9 @@ chronos:update_event(
 - [Architecture Guide](docs/ARCHITECTURE.md) - System design and components
 - [RRULE Guide](docs/RRULE_GUIDE.md) - Recurring events documentation
 - [VTODO/VJOURNAL Guide](docs/VTODO_VJOURNAL_GUIDE.md) - Task and journal management
+- [Architecture Decisions](docs/adr/) - ADR records
+- [Contributing](CONTRIBUTING.md) - Development guidelines
+- [Security Policy](SECURITY.md) - Security reporting and practices
 
 ## Known Issues
 

@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Timezone normalization for journal entries (same bug class as #17)
+- All-day events now use VALUE=DATE instead of DATE-TIME (#13)
+- Broken documentation links in README (#24)
+- list_tasks now returns completed tasks (#14)
+
+### Changed
+- CI: removed broken references to deleted test_imports.py and tests/integration/
+- CI: added Python 3.13 to black target-version
+- Relocated DEPENDENCY_INJECTION_ARCHITECTURE.md to docs/adr/0004
+- Relocated DEPENDENCY_UPDATE_REPORT.md to docs/
+
+### Removed
+- Vaporware "coming soon" feature promises from README (Import/Export, Sync)
+
 ## [2.0.0] - 2025-07-24
 
 ### Added

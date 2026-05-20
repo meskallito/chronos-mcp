@@ -232,13 +232,30 @@ bulk_delete_tasks(
     task_uids=["task-1", "task-2", "task-3"],
     mode="continue"
 )
+
+# Bulk create journal entries
+bulk_create_journals(
+    calendar_uid="calendar-123",
+    journals=[
+        {"summary": "Sprint Retrospective", "description": "What went well..."},
+        {"summary": "Design Review Notes", "description": "Approved final mockups"}
+    ],
+    mode="atomic"
+)
+
+# Bulk delete journal entries
+bulk_delete_journals(
+    calendar_uid="calendar-123",
+    journal_uids=["journal-1", "journal-2"],
+    mode="continue"
+)
 ```
 
 ## CalDAV Server Compatibility
 
 Chronos MCP's VTODO/VJOURNAL support works with any RFC 5545-compliant CalDAV server:
 - Nextcloud
-- ownCloud  
+- ownCloud
 - Radicale
 - DAViCal
 - And many others

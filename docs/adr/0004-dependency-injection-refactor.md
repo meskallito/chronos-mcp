@@ -1,3 +1,10 @@
+# ADR 0004: Dependency Injection Refactor
+
+- **Status**: Proposed
+- **Date**: 2025-09-20
+
+## Context
+
 # Chronos MCP Dependency Injection Architecture Plan
 
 ## Executive Summary
