@@ -67,7 +67,7 @@ dev = [
 chronos-mcp = "chronos_mcp.server:main"
 
 [tool.black]
-target-version = ["py310", "py311", "py312"]
+target-version = ["py310", "py311", "py312", "py313"]
 line-length = 100
 
 [tool.isort]
