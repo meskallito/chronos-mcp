@@ -7,20 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-05-19
+
 ### Fixed
 - Timezone normalization for journal entries (same bug class as #17)
 - All-day events now use VALUE=DATE instead of DATE-TIME (#13)
 - Broken documentation links in README (#24)
 - list_tasks now returns completed tasks (#14)
+- Version mismatch: __init__.py updated from 0.1.2 to match pyproject.toml
+- CONTRIBUTING.md GitHub org, email, and Discord links corrected
+- ARCHITECTURE.md Python version corrected (3.9+ -> 3.10+)
+- SECURITY.md version references updated from 0.2.0 to 2.0.0
+- VTODO guide bulk operation examples corrected to use actual parameter names
 
 ### Changed
 - CI: removed broken references to deleted test_imports.py and tests/integration/
-- CI: added Python 3.13 to black target-version
+- CI: removed hardcoded black --target-version from ci.yml lint job
+- CI: removed integration test job and radicale dependencies
 - Relocated DEPENDENCY_INJECTION_ARCHITECTURE.md to docs/adr/0004
 - Relocated DEPENDENCY_UPDATE_REPORT.md to docs/
+- Added CI status badge to README
+- Added full API reference for task/journal tools in README
+- Added [secure] optional dependency to pyproject.toml
+- Removed language_version pin from pre-commit black hook
 
 ### Removed
 - Vaporware "coming soon" feature promises from README (Import/Export, Sync)
+- Stale test_imports.py negation rules from .gitignore
+- test-integration Makefile target (directory deleted)
+- Discord notification stubs from CI workflows
 
 ## [2.0.0] - 2025-07-24
 
