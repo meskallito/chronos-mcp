@@ -57,13 +57,9 @@ class EventManager:
         """Create a new event - raises exceptions on failure"""
         request_id = request_id or str(uuid.uuid4())
 
-        calendar = self.calendars.get_calendar(
-            calendar_uid, account_alias, request_id=request_id
-        )
+        calendar = self.calendars.get_calendar(calendar_uid, account_alias, request_id=request_id)
         if not calendar:
-            raise CalendarNotFoundError(
-                calendar_uid, account_alias, request_id=request_id
-            )
+            raise CalendarNotFoundError(calendar_uid, account_alias, request_id=request_id)
 
         try:
             # Validate RRULE if provided
@@ -86,6 +82,10 @@ class EventManager:
                 event.add("dtstart", start.date())
                 event.add("dtend", end.date())
             else:
+                if start.tzinfo is not None and start.tzinfo != timezone.utc:
+                    start = start.astimezone(timezone.utc)
+                if end.tzinfo is not None and end.tzinfo != timezone.utc:
+                    end = end.astimezone(timezone.utc)
                 event.add("dtstart", start)
                 event.add("dtend", end)
             event.add("dtstamp", datetime.now(timezone.utc))
@@ -127,7 +127,7 @@ class EventManager:
             cal.add_component(event)
 
             # Save to CalDAV server
-            caldav_event = calendar.save_event(cal.to_ical().decode("utf-8"))
+            calendar.save_event(cal.to_ical().decode("utf-8"))
 
             event_model = Event(
                 uid=event_uid,
@@ -173,9 +173,7 @@ class EventManager:
                 f"Authorization error creating event '{summary}': {e}",
                 extra={"request_id": request_id},
             )
-            raise EventCreationError(
-                summary, "Authorization failed", request_id=request_id
-            )
+            raise EventCreationError(summary, "Authorization failed", request_id=request_id)
         except Exception as e:
             logger.error(
                 f"Error creating event '{summary}': {e}",
@@ -194,13 +192,9 @@ class EventManager:
         """Get events within a date range - raises exceptions on failure"""
         request_id = request_id or str(uuid.uuid4())
 
-        calendar = self.calendars.get_calendar(
-            calendar_uid, account_alias, request_id=request_id
-        )
+        calendar = self.calendars.get_calendar(calendar_uid, account_alias, request_id=request_id)
         if not calendar:
-            raise CalendarNotFoundError(
-                calendar_uid, account_alias, request_id=request_id
-            )
+            raise CalendarNotFoundError(calendar_uid, account_alias, request_id=request_id)
 
         events = []
         try:
@@ -208,9 +202,7 @@ class EventManager:
             results = calendar.date_search(start=start_date, end=end_date, expand=True)
 
             for caldav_event in results:
-                event_data = self._parse_caldav_event(
-                    caldav_event, calendar_uid, account_alias
-                )
+                event_data = self._parse_caldav_event(caldav_event, calendar_uid, account_alias)
                 if event_data:
                     events.append(event_data)
 
@@ -237,7 +229,7 @@ class EventManager:
                     end_dt = ical_to_datetime(dtend)
 
                     # Detect all-day events
-                    # Check if the original values were DATE (not DATE-TIME) or if it's midnight to midnight
+                    # Check if values were DATE (not DATE-TIME) or midnight-to-midnight
                     is_all_day = False
                     if dtstart and dtend:
                         # Check if values are DATE type (no time component)
@@ -273,13 +265,9 @@ class EventManager:
                             else None
                         ),
                         calendar_uid=calendar_uid,
-                        account_alias=account_alias
-                        or self._get_default_account()
-                        or "default",
+                        account_alias=account_alias or self._get_default_account() or "default",
                         recurrence_rule=(
-                            str(component.get("rrule", ""))
-                            if component.get("rrule")
-                            else None
+                            str(component.get("rrule", "")) if component.get("rrule") else None
                         ),
                     )
 
@@ -290,9 +278,7 @@ class EventManager:
                             attendees = [attendees]
 
                         for attendee in attendees:
-                            params = (
-                                attendee.params if hasattr(attendee, "params") else {}
-                            )
+                            params = attendee.params if hasattr(attendee, "params") else {}
                             email = str(attendee).replace("mailto:", "")
                             event.attendees.append(
                                 Attendee(
@@ -321,19 +307,13 @@ class EventManager:
         """Delete an event by UID - raises exceptions on failure"""
         request_id = request_id or str(uuid.uuid4())
 
-        calendar = self.calendars.get_calendar(
-            calendar_uid, account_alias, request_id=request_id
-        )
+        calendar = self.calendars.get_calendar(calendar_uid, account_alias, request_id=request_id)
         if not calendar:
-            raise CalendarNotFoundError(
-                calendar_uid, account_alias, request_id=request_id
-            )
+            raise CalendarNotFoundError(calendar_uid, account_alias, request_id=request_id)
 
         try:
             # Use utility function to find event with automatic fallback
-            event = get_item_with_fallback(
-                calendar, event_uid, "event", request_id=request_id
-            )
+            event = get_item_with_fallback(calendar, event_uid, "event", request_id=request_id)
             event.delete()
             logger.info(
                 f"Deleted event '{event_uid}'",
@@ -351,9 +331,7 @@ class EventManager:
                 f"Authorization error deleting event '{event_uid}': {e}",
                 extra={"request_id": request_id},
             )
-            raise EventDeletionError(
-                event_uid, "Authorization failed", request_id=request_id
-            )
+            raise EventDeletionError(event_uid, "Authorization failed", request_id=request_id)
         except Exception as e:
             logger.error(
                 f"Error deleting event '{event_uid}': {e}",
@@ -383,13 +361,9 @@ class EventManager:
         """
         request_id = request_id or str(uuid.uuid4())
 
-        calendar = self.calendars.get_calendar(
-            calendar_uid, account_alias, request_id=request_id
-        )
+        calendar = self.calendars.get_calendar(calendar_uid, account_alias, request_id=request_id)
         if not calendar:
-            raise CalendarNotFoundError(
-                calendar_uid, account_alias, request_id=request_id
-            )
+            raise CalendarNotFoundError(calendar_uid, account_alias, request_id=request_id)
 
         try:
             # Get existing event using utility function with automatic fallback
@@ -439,12 +413,16 @@ class EventManager:
                 if all_day:
                     existing_event["dtstart"].dt = start.date()
                 else:
+                    if start.tzinfo is not None and start.tzinfo != timezone.utc:
+                        start = start.astimezone(timezone.utc)
                     existing_event["dtstart"].dt = start
 
             if end is not None:
                 if all_day:
                     existing_event["dtend"].dt = end.date()
                 else:
+                    if end.tzinfo is not None and end.tzinfo != timezone.utc:
+                        end = end.astimezone(timezone.utc)
                     existing_event["dtend"].dt = end
 
             if location is not None:

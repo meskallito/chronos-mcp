@@ -62,17 +62,9 @@ def _matches_component_type(component: Dict[str, Any], options: SearchOptions) -
 
     # For legacy support, try to infer component type from fields
     if component_type == "VEVENT" and not component.get("component_type"):
-        if (
-            "due" in component
-            or "priority" in component
-            or "percent_complete" in component
-        ):
+        if "due" in component or "priority" in component or "percent_complete" in component:
             component_type = "VTODO"
-        elif (
-            "dtstart" in component
-            and "categories" in component
-            and not component.get("dtend")
-        ):
+        elif "dtstart" in component and "categories" in component and not component.get("dtend"):
             component_type = "VJOURNAL"
 
     return component_type in options.component_types
@@ -90,15 +82,15 @@ def search_components(
         if not options.query:
             return True
 
-        for field in options.fields:
-            value = component.get(field, "")
+        for search_field in options.fields:
+            value = component.get(search_field, "")
             if value is None:
                 continue
 
             # Handle special field formatting
-            if field == "categories" and isinstance(value, list):
+            if search_field == "categories" and isinstance(value, list):
                 value_str = " ".join(str(v) for v in value)
-            elif field in ["priority", "percent_complete"] and value is not None:
+            elif search_field in ["priority", "percent_complete"] and value is not None:
                 value_str = str(value)
             else:
                 value_str = str(value)
@@ -191,18 +183,18 @@ def calculate_relevance_score(
         "categories": 1.5,
     }
 
-    for field in options.fields:
-        if field not in field_weights:
+    for search_field in options.fields:
+        if search_field not in field_weights:
             continue
 
-        value = component.get(field, "")
+        value = component.get(search_field, "")
         if not value:
             continue
 
         # Handle special field formatting for scoring
-        if field == "categories" and isinstance(value, list):
+        if search_field == "categories" and isinstance(value, list):
             value_str = " ".join(str(v) for v in value)
-        elif field in ["priority", "percent_complete"] and value is not None:
+        elif search_field in ["priority", "percent_complete"] and value is not None:
             value_str = str(value)
         else:
             value_str = str(value)
@@ -232,7 +224,7 @@ def calculate_relevance_score(
                     position_factor = 1.0 - (first_pos / max(len(value_str), 1))
                     field_score *= 1.0 + position_factor * 0.5
 
-        score += field_score * field_weights.get(field, 1.0)
+        score += field_score * field_weights.get(search_field, 1.0)
 
     # Recency boost - use appropriate date field based on component type
     date_field = None
@@ -277,9 +269,7 @@ def search_components_ranked(
 
 
 # Backward compatibility functions
-def search_events(
-    events: List[Dict[str, Any]], options: SearchOptions
-) -> List[Dict[str, Any]]:
+def search_events(events: List[Dict[str, Any]], options: SearchOptions) -> List[Dict[str, Any]]:
     """Search events - backward compatibility wrapper."""
     # Ensure we're only searching events for backward compatibility
     event_options = SearchOptions(

@@ -29,9 +29,7 @@ class TestRecurringEventIntegration:
             account_alias="default",
         )
 
-        with patch(
-            "chronos_mcp.server.event_manager.create_event", return_value=mock_event
-        ):
+        with patch("chronos_mcp.server.event_manager.create_event", return_value=mock_event):
             # Direct function call
             result = await create_recurring_event.fn(
                 calendar_uid="cal-456",

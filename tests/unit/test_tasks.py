@@ -2,26 +2,24 @@
 Unit tests for task management
 """
 
-import uuid
-from datetime import datetime, timezone, timedelta
-from unittest.mock import MagicMock, Mock, patch
-from typing import List
+from datetime import datetime, timezone
+from unittest.mock import Mock, patch
 
-import pytest
 import caldav
+import pytest
 from icalendar import Calendar as iCalendar
 from icalendar import Todo as iTodo
 
 from chronos_mcp.calendars import CalendarManager
-from chronos_mcp.tasks import TaskManager
-from chronos_mcp.models import Task, TaskStatus
 from chronos_mcp.exceptions import (
     CalendarNotFoundError,
-    TaskNotFoundError,
+    ChronosError,
     EventCreationError,
     EventDeletionError,
-    ChronosError,
+    TaskNotFoundError,
 )
+from chronos_mcp.models import TaskStatus
+from chronos_mcp.tasks import TaskManager
 
 
 class TestTaskManager:
@@ -121,9 +119,7 @@ class TestTaskManager:
     # Phase 1: Basic CRUD Operations (25% coverage target)
 
     @patch("chronos_mcp.tasks.uuid.uuid4")
-    def test_create_task_minimal_success(
-        self, mock_uuid, mock_calendar_manager, mock_calendar
-    ):
+    def test_create_task_minimal_success(self, mock_uuid, mock_calendar_manager, mock_calendar):
         """Test create_task with minimal parameters - modern server"""
         # Setup
         mock_uuid.return_value = Mock()
@@ -203,9 +199,7 @@ class TestTaskManager:
         mock_calendar.save_event.assert_called_once()
 
     @patch("chronos_mcp.tasks.uuid.uuid4")
-    def test_create_task_basic_server(
-        self, mock_uuid, mock_calendar_manager, mock_calendar_basic
-    ):
+    def test_create_task_basic_server(self, mock_uuid, mock_calendar_manager, mock_calendar_basic):
         """Test create_task with basic server (no save_todo support)"""
         # Setup
         mock_uuid.return_value = Mock()
@@ -260,7 +254,7 @@ class TestTaskManager:
         # Verify
         assert len(result) == 1
         assert result[0].uid == "test-task-123"
-        mock_calendar.todos.assert_called_once()
+        mock_calendar.todos.assert_called_once_with(include_completed=True)
 
     def test_list_tasks_with_status_filter(
         self, mock_calendar_manager, mock_calendar, mock_caldav_task
@@ -272,17 +266,37 @@ class TestTaskManager:
         mock_calendar.todos.return_value = [mock_caldav_task]
 
         # Execute
-        result = mgr.list_tasks(
-            calendar_uid="cal-123", status_filter=TaskStatus.NEEDS_ACTION
-        )
+        result = mgr.list_tasks(calendar_uid="cal-123", status_filter=TaskStatus.NEEDS_ACTION)
 
         # Verify
         assert len(result) == 1
         assert result[0].status == TaskStatus.NEEDS_ACTION
 
-    def test_update_task_summary_only(
-        self, mock_calendar_manager, mock_calendar, mock_caldav_task
-    ):
+    def test_list_tasks_includes_completed(self, mock_calendar_manager, mock_calendar):
+        """Test list_tasks fetches completed tasks from server (issue #14)"""
+        completed_vtodo = (
+            "BEGIN:VTODO\r\n"
+            "UID:completed-task-456\r\n"
+            "SUMMARY:Done Task\r\n"
+            "STATUS:COMPLETED\r\n"
+            "PERCENT-COMPLETE:100\r\n"
+            "DTSTAMP:20250101T000000Z\r\n"
+            "END:VTODO\r\n"
+        )
+        completed_caldav = Mock()
+        completed_caldav.data = completed_vtodo
+
+        mgr = TaskManager(mock_calendar_manager)
+        mock_calendar_manager.get_calendar.return_value = mock_calendar
+        mock_calendar.todos.return_value = [completed_caldav]
+
+        result = mgr.list_tasks(calendar_uid="cal-123")
+
+        assert len(result) == 1
+        assert result[0].status == TaskStatus.COMPLETED
+        mock_calendar.todos.assert_called_once_with(include_completed=True)
+
+    def test_update_task_summary_only(self, mock_calendar_manager, mock_calendar, mock_caldav_task):
         """Test update_task updating only summary field"""
         # Setup
         mgr = TaskManager(mock_calendar_manager)
@@ -347,19 +361,13 @@ class TestTaskManager:
         with pytest.raises(CalendarNotFoundError):
             mgr.create_task(calendar_uid="nonexistent-cal", summary="Test Task")
 
-    def test_create_task_authorization_error(
-        self, mock_calendar_manager, mock_calendar
-    ):
+    def test_create_task_authorization_error(self, mock_calendar_manager, mock_calendar):
         """Test create_task handles CalDAV authorization errors"""
         # Setup
         mgr = TaskManager(mock_calendar_manager)
         mock_calendar_manager.get_calendar.return_value = mock_calendar
-        mock_calendar.save_todo.side_effect = caldav.lib.error.AuthorizationError(
-            "Auth failed"
-        )
-        mock_calendar.save_event.side_effect = caldav.lib.error.AuthorizationError(
-            "Auth failed"
-        )
+        mock_calendar.save_todo.side_effect = caldav.lib.error.AuthorizationError("Auth failed")
+        mock_calendar.save_event.side_effect = caldav.lib.error.AuthorizationError("Auth failed")
 
         # Execute & Verify
         with pytest.raises(EventCreationError):
@@ -387,9 +395,7 @@ class TestTaskManager:
         with pytest.raises(CalendarNotFoundError):
             mgr.get_task(task_uid="test-task-123", calendar_uid="nonexistent-cal")
 
-    def test_get_task_not_found_event_by_uid(
-        self, mock_calendar_manager, mock_calendar
-    ):
+    def test_get_task_not_found_event_by_uid(self, mock_calendar_manager, mock_calendar):
         """Test get_task raises TaskNotFoundError when task not found via event_by_uid"""
         # Setup
         mgr = TaskManager(mock_calendar_manager)
@@ -401,9 +407,7 @@ class TestTaskManager:
         with pytest.raises(TaskNotFoundError):
             mgr.get_task(task_uid="nonexistent-task", calendar_uid="cal-123")
 
-    def test_get_task_not_found_fallback_search(
-        self, mock_calendar_manager, mock_calendar
-    ):
+    def test_get_task_not_found_fallback_search(self, mock_calendar_manager, mock_calendar):
         """Test get_task raises TaskNotFoundError when task not found via fallback search"""
         # Setup
         mgr = TaskManager(mock_calendar_manager)
@@ -449,9 +453,7 @@ class TestTaskManager:
 
         # Execute & Verify
         with pytest.raises(TaskNotFoundError):
-            mgr.update_task(
-                task_uid="nonexistent-task", calendar_uid="cal-123", summary="Updated"
-            )
+            mgr.update_task(task_uid="nonexistent-task", calendar_uid="cal-123", summary="Updated")
 
     def test_delete_task_calendar_not_found(self, mock_calendar_manager):
         """Test delete_task raises CalendarNotFoundError when calendar not found"""
@@ -509,7 +511,7 @@ class TestTaskManager:
         assert result is not None
         assert result.uid == "test-task-123"
         mock_calendar.event_by_uid.assert_called_once()
-        mock_calendar.todos.assert_called_once()
+        mock_calendar.todos.assert_called_once_with(include_completed=True)
 
     def test_get_task_fallback_to_events_search(
         self, mock_calendar_manager, mock_calendar_basic, mock_caldav_task
@@ -544,7 +546,7 @@ class TestTaskManager:
         # Verify
         assert len(result) == 1
         assert result[0].uid == "test-task-123"
-        mock_calendar.todos.assert_called_once()
+        mock_calendar.todos.assert_called_once_with(include_completed=True)
         mock_calendar.events.assert_called_once()
 
     def test_list_tasks_basic_server_events_only(
@@ -618,9 +620,7 @@ class TestTaskManager:
 
     # Phase 4: Edge Cases and Validation (80% coverage target)
 
-    def test_create_task_priority_validation(
-        self, mock_calendar_manager, mock_calendar
-    ):
+    def test_create_task_priority_validation(self, mock_calendar_manager, mock_calendar):
         """Test create_task validates priority range (1-9)"""
         # Setup
         mgr = TaskManager(mock_calendar_manager)
@@ -641,9 +641,7 @@ class TestTaskManager:
             # Priority should be ignored for invalid values
             assert result is not None
 
-    def test_update_task_all_fields(
-        self, mock_calendar_manager, mock_calendar, mock_caldav_task
-    ):
+    def test_update_task_all_fields(self, mock_calendar_manager, mock_calendar, mock_caldav_task):
         """Test update_task updating all possible fields"""
         # Setup
         mgr = TaskManager(mock_calendar_manager)
@@ -744,9 +742,7 @@ class TestTaskManager:
 
         # Execute & Verify
         with pytest.raises(EventCreationError):
-            mgr.update_task(
-                task_uid="test-task-123", calendar_uid="cal-123", summary="Updated"
-            )
+            mgr.update_task(task_uid="test-task-123", calendar_uid="cal-123", summary="Updated")
 
     def test_parse_caldav_task_malformed_data(self, mock_calendar_manager):
         """Test _parse_caldav_task handles malformed iCalendar data"""
@@ -856,9 +852,7 @@ class TestTaskManager:
             result.status == TaskStatus.NEEDS_ACTION
         )  # Should fallback to default for invalid status
 
-    def test_get_task_general_error_handling(
-        self, mock_calendar_manager, mock_calendar
-    ):
+    def test_get_task_general_error_handling(self, mock_calendar_manager, mock_calendar):
         """Test get_task handles unexpected errors gracefully"""
         # Setup
         mgr = TaskManager(mock_calendar_manager)
@@ -895,9 +889,7 @@ class TestTaskManager:
         assert result[0].uid == "test-task-123"
 
     @patch("chronos_mcp.tasks.uuid.uuid4")
-    def test_create_task_with_request_id(
-        self, mock_uuid, mock_calendar_manager, mock_calendar
-    ):
+    def test_create_task_with_request_id(self, mock_uuid, mock_calendar_manager, mock_calendar):
         """Test create_task respects provided request_id"""
         # Setup
         mock_uuid.return_value.__str__ = Mock(return_value="test-task-123")

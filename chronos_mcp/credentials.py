@@ -53,17 +53,13 @@ class CredentialManager:
                 self.keyring_available = False
                 logger.warning(f"Keyring initialization failed: {e}")
         else:
-            logger.warning(
-                "Keyring module not available - passwords will be stored in config file"
-            )
+            logger.warning("Keyring module not available - passwords will be stored in config file")
 
     def _get_keyring_key(self, alias: str) -> str:
         """Generate the keyring key for an account alias."""
         return f"{self.KEY_PREFIX}{alias}"
 
-    def get_password(
-        self, alias: str, fallback_password: Optional[str] = None
-    ) -> Optional[str]:
+    def get_password(self, alias: str, fallback_password: Optional[str] = None) -> Optional[str]:
         """
         Retrieve password from keyring, with fallback to provided value.
 
@@ -80,15 +76,13 @@ class CredentialManager:
                 password = keyring.get_password(self.SERVICE_NAME, key)
 
                 if password:
-                    logger.debug(
-                        "Retrieved password from keyring for account: [REDACTED]"
-                    )
+                    logger.debug("Retrieved password from keyring for account: [REDACTED]")
                     return password
                 elif fallback_password:
                     logger.warning(
                         f"Password for '{alias}' found in config file but not in keyring. "
-                        "Consider running the migration script to securely store passwords in keyring: "
-                        "python -m chronos_mcp.scripts.migrate_to_keyring"
+                        "Consider running the migration script to securely store "
+                        "passwords in keyring: python -m chronos_mcp.scripts.migrate_to_keyring"
                     )
 
             except Exception as e:
@@ -113,9 +107,7 @@ class CredentialManager:
             True if successfully stored, False otherwise
         """
         if not self.keyring_available:
-            logger.debug(
-                "Keyring not available, cannot store password for account: [REDACTED]"
-            )
+            logger.debug("Keyring not available, cannot store password for account: [REDACTED]")
             return False
 
         try:

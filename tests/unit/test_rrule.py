@@ -24,9 +24,7 @@ class TestRRuleValidator:
 
     def test_valid_monthly_with_bymonthday(self):
         """Test valid monthly recurrence on specific day."""
-        is_valid, error = RRuleValidator.validate_rrule(
-            "FREQ=MONTHLY;BYMONTHDAY=15;COUNT=12"
-        )
+        is_valid, error = RRuleValidator.validate_rrule("FREQ=MONTHLY;BYMONTHDAY=15;COUNT=12")
         assert is_valid is True
         assert error is None
 
@@ -56,9 +54,7 @@ class TestRRuleValidator:
 
     def test_invalid_count_too_high(self):
         """Test invalid COUNT exceeding maximum."""
-        is_valid, error = RRuleValidator.validate_rrule(
-            f"FREQ=DAILY;COUNT={MAX_COUNT + 1}"
-        )
+        is_valid, error = RRuleValidator.validate_rrule(f"FREQ=DAILY;COUNT={MAX_COUNT + 1}")
         assert is_valid is False
         assert f"cannot exceed {MAX_COUNT}" in error
 
@@ -86,17 +82,13 @@ class TestRRuleValidator:
 
     def test_valid_with_interval(self):
         """Test valid RRULE with interval."""
-        is_valid, error = RRuleValidator.validate_rrule(
-            "FREQ=WEEKLY;INTERVAL=2;COUNT=10"
-        )
+        is_valid, error = RRuleValidator.validate_rrule("FREQ=WEEKLY;INTERVAL=2;COUNT=10")
         assert is_valid is True
         assert error is None
 
     def test_invalid_interval_zero(self):
         """Test invalid interval of zero."""
-        is_valid, error = RRuleValidator.validate_rrule(
-            "FREQ=DAILY;INTERVAL=0;COUNT=10"
-        )
+        is_valid, error = RRuleValidator.validate_rrule("FREQ=DAILY;INTERVAL=0;COUNT=10")
         assert is_valid is False
         assert "INTERVAL must be at least 1" in error
 
@@ -112,26 +104,18 @@ class TestRRuleExpansion:
 
     def test_expand_daily_occurrences(self):
         """Test expanding daily occurrences."""
-        start = datetime.now(timezone.utc).replace(
-            hour=10, minute=0, second=0, microsecond=0
-        )
+        start = datetime.now(timezone.utc).replace(hour=10, minute=0, second=0, microsecond=0)
         occurrences = RRuleValidator.expand_occurrences("FREQ=DAILY;COUNT=5", start)
 
         assert len(occurrences) == 5
         # Check dates are consecutive days
         for i in range(1, 5):
-            assert (
-                occurrences[i].date() == (occurrences[i - 1] + timedelta(days=1)).date()
-            )
+            assert occurrences[i].date() == (occurrences[i - 1] + timedelta(days=1)).date()
 
     def test_expand_weekly_occurrences(self):
         """Test expanding weekly occurrences."""
-        start = datetime.now(timezone.utc).replace(
-            hour=14, minute=0, second=0, microsecond=0
-        )
-        occurrences = RRuleValidator.expand_occurrences(
-            "FREQ=WEEKLY;BYDAY=MO,WE,FR;COUNT=6", start
-        )
+        start = datetime.now(timezone.utc).replace(hour=14, minute=0, second=0, microsecond=0)
+        occurrences = RRuleValidator.expand_occurrences("FREQ=WEEKLY;BYDAY=MO,WE,FR;COUNT=6", start)
 
         assert len(occurrences) == 6
 
@@ -174,9 +158,7 @@ class TestRRuleInfo:
 
     def test_get_rrule_info_complete(self):
         """Test extracting complete RRULE information."""
-        info = RRuleValidator.get_rrule_info(
-            "FREQ=WEEKLY;INTERVAL=2;COUNT=10;BYDAY=MO,WE,FR"
-        )
+        info = RRuleValidator.get_rrule_info("FREQ=WEEKLY;INTERVAL=2;COUNT=10;BYDAY=MO,WE,FR")
         assert info["frequency"] == "WEEKLY"
         assert info["interval"] == 2
         assert info["count"] == 10
@@ -196,9 +178,7 @@ class TestRRuleInfo:
 
     def test_get_rrule_info_with_until(self):
         """Test extracting RRULE with UNTIL."""
-        info = RRuleValidator.get_rrule_info(
-            "FREQ=MONTHLY;UNTIL=20251231T235959Z;BYMONTHDAY=15"
-        )
+        info = RRuleValidator.get_rrule_info("FREQ=MONTHLY;UNTIL=20251231T235959Z;BYMONTHDAY=15")
 
         assert info["frequency"] == "MONTHLY"
         assert info["until"] == "20251231T235959Z"

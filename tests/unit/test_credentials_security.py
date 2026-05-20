@@ -2,14 +2,10 @@
 Security-focused tests for credential management
 """
 
-import io
 import logging
-import sys
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import patch
 
-import pytest
-
-from chronos_mcp.credentials import CredentialManager, get_credential_manager
+from chronos_mcp.credentials import CredentialManager
 
 
 class TestCredentialSecurity:
@@ -29,9 +25,7 @@ class TestCredentialSecurity:
 
             # Check that debug log doesn't contain actual alias
             debug_logs = [
-                record.message
-                for record in caplog.records
-                if record.levelname == "DEBUG"
+                record.message for record in caplog.records if record.levelname == "DEBUG"
             ]
             assert any("[REDACTED]" in log for log in debug_logs)
             assert not any("test_alias" in log for log in debug_logs)
@@ -43,14 +37,10 @@ class TestCredentialSecurity:
         manager.keyring_available = False
 
         with caplog.at_level(logging.DEBUG):
-            password = manager.get_password(
-                "test_alias", fallback_password="fallback_pass"
-            )
+            password = manager.get_password("test_alias", fallback_password="fallback_pass")
 
         # Check that debug log doesn't contain actual alias
-        debug_logs = [
-            record.message for record in caplog.records if record.levelname == "DEBUG"
-        ]
+        debug_logs = [record.message for record in caplog.records if record.levelname == "DEBUG"]
         assert any("[REDACTED]" in log for log in debug_logs)
         assert not any("test_alias" in log for log in debug_logs)
         assert password == "fallback_pass"
@@ -67,11 +57,7 @@ class TestCredentialSecurity:
                 result = manager.set_password("test_alias", "secret_password")
 
             # Check that info log doesn't contain actual alias
-            info_logs = [
-                record.message
-                for record in caplog.records
-                if record.levelname == "INFO"
-            ]
+            info_logs = [record.message for record in caplog.records if record.levelname == "INFO"]
             assert any("[REDACTED]" in log for log in info_logs)
             assert not any("test_alias" in log for log in info_logs)
             assert result is True
@@ -88,11 +74,7 @@ class TestCredentialSecurity:
                 result = manager.delete_password("test_alias")
 
             # Check logs don't contain actual alias
-            info_logs = [
-                record.message
-                for record in caplog.records
-                if record.levelname == "INFO"
-            ]
+            info_logs = [record.message for record in caplog.records if record.levelname == "INFO"]
             assert any("[REDACTED]" in log for log in info_logs)
             assert not any("test_alias" in log for log in info_logs)
             assert result is True
@@ -121,9 +103,7 @@ class TestCredentialSecurity:
 
             # Check that debug log doesn't contain actual alias
             debug_logs = [
-                record.message
-                for record in caplog.records
-                if record.levelname == "DEBUG"
+                record.message for record in caplog.records if record.levelname == "DEBUG"
             ]
             assert any("[REDACTED]" in log for log in debug_logs)
             assert not any("test_alias" in log for log in debug_logs)
@@ -138,9 +118,7 @@ class TestCredentialSecurity:
             result = manager.set_password("test_alias", "secret_password")
 
         # Check that debug log doesn't contain actual alias
-        debug_logs = [
-            record.message for record in caplog.records if record.levelname == "DEBUG"
-        ]
+        debug_logs = [record.message for record in caplog.records if record.levelname == "DEBUG"]
         assert any("[REDACTED]" in log for log in debug_logs)
         assert not any("test_alias" in log for log in debug_logs)
         assert result is False
@@ -165,9 +143,7 @@ class TestCredentialSecurity:
             all_logs = [record.message for record in caplog.records]
             assert not any("supersecret123" in log for log in all_logs)
             assert not any(
-                "secret" in log.lower()
-                for log in all_logs
-                if "supersecret123" not in log
+                "secret" in log.lower() for log in all_logs if "supersecret123" not in log
             )
 
     def test_alias_never_logged_in_password_context(self, caplog):

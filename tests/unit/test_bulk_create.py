@@ -3,12 +3,9 @@ Unit tests for bulk event creation functionality
 """
 
 import json
-from datetime import datetime
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import pytest
-
-from chronos_mcp.exceptions import ChronosError
 
 # Import the actual function directly
 from chronos_mcp.server import bulk_create_events
@@ -81,9 +78,7 @@ class TestBulkCreateEvents:
         mock_result = BulkResult(total=3, successful=3, failed=0)
         for i in range(3):
             mock_result.results.append(
-                OperationResult(
-                    index=i, success=True, uid=f"created-{i}", duration_ms=0.1
-                )
+                OperationResult(index=i, success=True, uid=f"created-{i}", duration_ms=0.1)
             )
 
         mock_managers["bulk"].bulk_create_events.return_value = mock_result
@@ -129,9 +124,7 @@ class TestBulkCreateEvents:
 
         mock_result = BulkResult(total=2, successful=1, failed=1)
         mock_result.results.append(
-            OperationResult(
-                index=0, success=True, uid="valid-event-uid", duration_ms=0.1
-            )
+            OperationResult(index=0, success=True, uid="valid-event-uid", duration_ms=0.1)
         )
         mock_result.results.append(
             OperationResult(
@@ -168,9 +161,7 @@ class TestBulkCreateEvents:
             OperationResult(index=0, success=True, uid="uid-Event 1", duration_ms=0.1)
         )
         mock_result.results.append(
-            OperationResult(
-                index=1, success=False, error="Creation failed", duration_ms=0.1
-            )
+            OperationResult(index=1, success=False, error="Creation failed", duration_ms=0.1)
         )
         mock_result.results.append(
             OperationResult(index=2, success=True, uid="uid-Event 3", duration_ms=0.1)
@@ -209,9 +200,7 @@ class TestBulkCreateEvents:
             OperationResult(index=0, success=True, uid="uid-Event 1", duration_ms=0.1)
         )
         mock_result.results.append(
-            OperationResult(
-                index=1, success=False, error="Creation failed", duration_ms=0.1
-            )
+            OperationResult(index=1, success=False, error="Creation failed", duration_ms=0.1)
         )
         # In fail_fast mode, processing stops after first failure
 

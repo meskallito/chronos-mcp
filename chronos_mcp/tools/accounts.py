@@ -6,11 +6,7 @@ from typing import Any, Dict, Optional
 
 from pydantic import Field
 
-from ..exceptions import (
-    AccountAlreadyExistsError,
-    AccountNotFoundError,
-    ValidationError,
-)
+from ..exceptions import AccountNotFoundError
 from ..models import Account
 from ..validation import InputValidator
 from .base import create_success_response, handle_tool_errors
@@ -26,9 +22,7 @@ async def add_account(
     url: str = Field(..., description="CalDAV server URL"),
     username: str = Field(..., description="Username for authentication"),
     password: str = Field(..., description="Password for authentication"),
-    display_name: Optional[str] = Field(
-        None, description="Display name for the account"
-    ),
+    display_name: Optional[str] = Field(None, description="Display name for the account"),
     allow_local: bool = Field(
         False,
         description="Allow localhost/private IPs (WARNING: only for development/testing)",
@@ -43,16 +37,12 @@ async def add_account(
     """
     # Validate inputs before creating account
     # SSRF protection is enabled by default (allow_private_ips defaults to False)
-    url = InputValidator.validate_url(
-        url, allow_private_ips=allow_local, field_name="url"
-    )
+    url = InputValidator.validate_url(url, allow_private_ips=allow_local, field_name="url")
 
     alias = InputValidator.validate_text_field(alias, "alias", required=True)
     username = InputValidator.validate_text_field(username, "username", required=True)
     password = InputValidator.validate_text_field(password, "password", required=True)
-    display_name = InputValidator.validate_text_field(
-        display_name or alias, "display_name"
-    )
+    display_name = InputValidator.validate_text_field(display_name or alias, "display_name")
 
     account = Account(
         alias=alias,
@@ -63,9 +53,7 @@ async def add_account(
     )
     _managers["config_manager"].add_account(account)
 
-    test_result = _managers["account_manager"].test_account(
-        alias, request_id=request_id
-    )
+    test_result = _managers["account_manager"].test_account(alias, request_id=request_id)
 
     return create_success_response(
         message=f"Account '{alias}' added successfully",
@@ -87,8 +75,7 @@ async def list_accounts() -> Dict[str, Any]:
                 "url": str(acc.url),
                 "display_name": acc.display_name,
                 "status": acc.status,
-                "is_default": alias
-                == _managers["config_manager"].config.default_account,
+                "is_default": alias == _managers["config_manager"].config.default_account,
             }
             for alias, acc in accounts.items()
         ],

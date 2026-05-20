@@ -2,10 +2,8 @@
 Comprehensive unit tests for journal management
 """
 
-import uuid
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, Mock, patch
-from uuid import uuid4
+from unittest.mock import Mock, patch
 
 import pytest
 from icalendar import Calendar as iCalendar
@@ -130,9 +128,7 @@ class TestJournalCRUD:
         mock_calendar.save_journal.assert_called_once()
         mock_calendar.save_event.assert_called_once()
 
-    def test_create_journal_no_save_journal_method(
-        self, journal_manager, sample_journal_data
-    ):
+    def test_create_journal_no_save_journal_method(self, journal_manager, sample_journal_data):
         """Test journal creation when calendar doesn't have save_journal method"""
         # Setup calendar without save_journal method
         mock_calendar = Mock()
@@ -211,9 +207,7 @@ class TestJournalCRUD:
 
         assert "Generic error" in str(exc_info.value)
 
-    def test_get_journal_success_with_event_by_uid(
-        self, journal_manager, mock_calendar
-    ):
+    def test_get_journal_success_with_event_by_uid(self, journal_manager, mock_calendar):
         """Test successful journal retrieval using event_by_uid"""
         # Setup
         journal_manager.calendars.get_calendar.return_value = mock_calendar
@@ -244,9 +238,7 @@ class TestJournalCRUD:
         mock_calendar.event_by_uid.assert_called_once_with("test-journal-123")
         mock_parse.assert_called_once()
 
-    def test_get_journal_fallback_to_journals_search(
-        self, journal_manager, mock_calendar
-    ):
+    def test_get_journal_fallback_to_journals_search(self, journal_manager, mock_calendar):
         """Test journal retrieval fallback to searching through journals"""
         # Setup
         journal_manager.calendars.get_calendar.return_value = mock_calendar
@@ -273,9 +265,7 @@ class TestJournalCRUD:
 
         mock_calendar.journals.return_value = [mock_journal1, mock_journal2]
 
-        result = journal_manager.get_journal(
-            journal_uid="test-journal-123", calendar_uid="cal-123"
-        )
+        result = journal_manager.get_journal(journal_uid="test-journal-123", calendar_uid="cal-123")
 
         assert result is not None
         assert result.uid == "test-journal-123"
@@ -283,7 +273,7 @@ class TestJournalCRUD:
         mock_calendar.journals.assert_called_once()
 
     def test_get_journal_fallback_to_events_search(self, journal_manager):
-        """Test journal retrieval fallback to searching through events when journals() unavailable"""
+        """Test journal retrieval fallback to events when journals() unavailable"""
         # Setup calendar without journals method
         mock_calendar = Mock()
         mock_calendar.event_by_uid.side_effect = Exception("event_by_uid failed")
@@ -314,9 +304,7 @@ class TestJournalCRUD:
 
         mock_calendar.events.return_value = [mock_event1, mock_event2]
 
-        result = journal_manager.get_journal(
-            journal_uid="test-journal-123", calendar_uid="cal-123"
-        )
+        result = journal_manager.get_journal(journal_uid="test-journal-123", calendar_uid="cal-123")
 
         assert result is not None
         assert result.uid == "test-journal-123"
@@ -329,18 +317,14 @@ class TestJournalCRUD:
         mock_calendar.journals.return_value = []
 
         with pytest.raises(JournalNotFoundError):
-            journal_manager.get_journal(
-                journal_uid="nonexistent", calendar_uid="cal-123"
-            )
+            journal_manager.get_journal(journal_uid="nonexistent", calendar_uid="cal-123")
 
     def test_get_journal_calendar_not_found(self, journal_manager):
         """Test journal retrieval with non-existent calendar"""
         journal_manager.calendars.get_calendar.return_value = None
 
         with pytest.raises(CalendarNotFoundError):
-            journal_manager.get_journal(
-                journal_uid="test-journal-123", calendar_uid="nonexistent"
-            )
+            journal_manager.get_journal(journal_uid="test-journal-123", calendar_uid="nonexistent")
 
     def test_get_journal_generic_error(self, journal_manager, mock_calendar):
         """Test journal retrieval with generic error"""
@@ -349,13 +333,9 @@ class TestJournalCRUD:
         mock_calendar.journals.side_effect = Exception("Generic error")
 
         with pytest.raises(ChronosError):
-            journal_manager.get_journal(
-                journal_uid="test-journal-123", calendar_uid="cal-123"
-            )
+            journal_manager.get_journal(journal_uid="test-journal-123", calendar_uid="cal-123")
 
-    def test_list_journals_success_with_journals_method(
-        self, journal_manager, mock_calendar
-    ):
+    def test_list_journals_success_with_journals_method(self, journal_manager, mock_calendar):
         """Test successful journal listing using journals() method"""
         journal_manager.calendars.get_calendar.return_value = mock_calendar
 
@@ -718,9 +698,7 @@ class TestJournalServerCompatibility:
         journal_manager.calendars.get_calendar.return_value = mock_calendar
 
         with pytest.raises(JournalNotFoundError):
-            journal_manager.delete_journal(
-                calendar_uid="cal-123", journal_uid="nonexistent"
-            )
+            journal_manager.delete_journal(calendar_uid="cal-123", journal_uid="nonexistent")
 
     def test_delete_journal_authorization_error(self, journal_manager):
         """Test journal deletion with authorization error"""
@@ -733,12 +711,11 @@ class TestJournalServerCompatibility:
         mock_journal.delete.side_effect = AuthorizationError("Unauthorized")
         mock_calendar.event_by_uid.return_value = mock_journal
 
-        # Execute & Verify - when journal is found but deletion fails due to auth, raises EventDeletionError
+        # Execute & Verify - when journal found but deletion fails due to auth,
+        # raises EventDeletionError (not JournalNotFoundError since it was found)
         # (not JournalNotFoundError, since the journal was successfully found)
         with pytest.raises(EventDeletionError):
-            journal_manager.delete_journal(
-                calendar_uid="cal-123", journal_uid="test-journal-123"
-            )
+            journal_manager.delete_journal(calendar_uid="cal-123", journal_uid="test-journal-123")
 
     def test_delete_journal_generic_error(self, journal_manager):
         """Test journal deletion with generic error"""
@@ -752,9 +729,7 @@ class TestJournalServerCompatibility:
         # Execute & Verify - when journal is found but deletion fails, raises EventDeletionError
         # (not JournalNotFoundError, since the journal was successfully found)
         with pytest.raises(EventDeletionError):
-            journal_manager.delete_journal(
-                calendar_uid="cal-123", journal_uid="test-journal-123"
-            )
+            journal_manager.delete_journal(calendar_uid="cal-123", journal_uid="test-journal-123")
 
     def _create_journal_ical(self):
         """Create sample iCalendar data with VJOURNAL component"""
@@ -782,9 +757,7 @@ class TestJournalEdgeCases:
         mock_caldav_event = Mock()
         mock_caldav_event.data = self._create_complex_journal_ical()
 
-        result = journal_manager._parse_caldav_journal(
-            mock_caldav_event, "cal-123", "test_account"
-        )
+        result = journal_manager._parse_caldav_journal(mock_caldav_event, "cal-123", "test_account")
 
         assert result is not None
         assert result.uid == "complex-journal-123"
@@ -808,9 +781,7 @@ class TestJournalEdgeCases:
         mock_caldav_event = Mock()
         mock_caldav_event.data = cal.to_ical().decode("utf-8")
 
-        result = journal_manager._parse_caldav_journal(
-            mock_caldav_event, "cal-123", "test_account"
-        )
+        result = journal_manager._parse_caldav_journal(mock_caldav_event, "cal-123", "test_account")
 
         assert result is not None
         # The icalendar library wraps categories in objects that need string conversion
@@ -831,9 +802,7 @@ class TestJournalEdgeCases:
         mock_caldav_event = Mock()
         mock_caldav_event.data = cal.to_ical().decode("utf-8")
 
-        result = journal_manager._parse_caldav_journal(
-            mock_caldav_event, "cal-123", "test_account"
-        )
+        result = journal_manager._parse_caldav_journal(mock_caldav_event, "cal-123", "test_account")
 
         assert result is not None
         assert result.related_to == ["event-123"]
@@ -878,9 +847,7 @@ class TestJournalEdgeCases:
         mock_caldav_event = Mock()
         mock_caldav_event.data = cal.to_ical().decode("utf-8")
 
-        result = journal_manager._parse_caldav_journal(
-            mock_caldav_event, "cal-123", "test_account"
-        )
+        result = journal_manager._parse_caldav_journal(mock_caldav_event, "cal-123", "test_account")
 
         assert result is None
 
@@ -889,9 +856,7 @@ class TestJournalEdgeCases:
         mock_caldav_event = Mock()
         mock_caldav_event.data = "INVALID ICAL DATA"
 
-        result = journal_manager._parse_caldav_journal(
-            mock_caldav_event, "cal-123", "test_account"
-        )
+        result = journal_manager._parse_caldav_journal(mock_caldav_event, "cal-123", "test_account")
 
         assert result is None
 
@@ -900,9 +865,7 @@ class TestJournalEdgeCases:
         mock_caldav_event = Mock()
         mock_caldav_event.data = self._create_complex_journal_ical()
 
-        with patch(
-            "icalendar.Calendar.from_ical", side_effect=Exception("Parse error")
-        ):
+        with patch("icalendar.Calendar.from_ical", side_effect=Exception("Parse error")):
             result = journal_manager._parse_caldav_journal(
                 mock_caldav_event, "cal-123", "test_account"
             )

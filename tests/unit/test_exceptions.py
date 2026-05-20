@@ -51,8 +51,6 @@ class TestChronosError:
 
     def test_str_representation(self):
         """Test string representation of error"""
-        error = ChronosError(
-            message="Test error", error_code="TEST_ERROR", request_id="test-123"
-        )
+        error = ChronosError(message="Test error", error_code="TEST_ERROR", request_id="test-123")
 
         assert str(error) == "TEST_ERROR: Test error (request_id=test-123)"

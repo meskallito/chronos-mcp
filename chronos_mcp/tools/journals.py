@@ -7,13 +7,7 @@ from typing import Any, Dict, List, Optional, Union
 
 from pydantic import Field
 
-from ..exceptions import (
-    CalendarNotFoundError,
-    ChronosError,
-    ErrorSanitizer,
-    EventNotFoundError,
-    ValidationError,
-)
+from ..exceptions import CalendarNotFoundError, ChronosError, ErrorSanitizer, ValidationError
 from ..logging_config import setup_logging
 from ..utils import parse_datetime
 from ..validation import InputValidator
@@ -30,12 +24,8 @@ async def create_journal(
     calendar_uid: str = Field(..., description="Calendar UID"),
     summary: str = Field(..., description="Journal entry title/summary"),
     description: Optional[str] = Field(None, description="Journal entry content"),
-    entry_date: Optional[str] = Field(
-        None, description="Journal entry date (ISO format)"
-    ),
-    related_to: Optional[List[str]] = Field(
-        None, description="List of related component UIDs"
-    ),
+    entry_date: Optional[str] = Field(None, description="Journal entry date (ISO format)"),
+    related_to: Optional[List[str]] = Field(None, description="List of related component UIDs"),
     account: Optional[str] = Field(None, description="Account alias"),
 ) -> Dict[str, Any]:
     """Create a new journal entry"""
@@ -44,13 +34,9 @@ async def create_journal(
     try:
         # Validate and sanitize text inputs
         try:
-            summary = InputValidator.validate_text_field(
-                summary, "summary", required=True
-            )
+            summary = InputValidator.validate_text_field(summary, "summary", required=True)
             if description:
-                description = InputValidator.validate_text_field(
-                    description, "description"
-                )
+                description = InputValidator.validate_text_field(description, "description")
         except ValidationError as e:
             return {
                 "success": False,
@@ -80,9 +66,7 @@ async def create_journal(
                 "uid": journal.uid,
                 "summary": journal.summary,
                 "description": journal.description,
-                "entry_date": (
-                    journal.dtstart.isoformat() if journal.dtstart else None
-                ),
+                "entry_date": (journal.dtstart.isoformat() if journal.dtstart else None),
                 "related_to": journal.related_to,
             },
             "request_id": request_id,
@@ -155,9 +139,7 @@ async def list_journals(
                     "uid": journal.uid,
                     "summary": journal.summary,
                     "description": journal.description,
-                    "entry_date": (
-                        journal.dtstart.isoformat() if journal.dtstart else None
-                    ),
+                    "entry_date": (journal.dtstart.isoformat() if journal.dtstart else None),
                     "related_to": journal.related_to,
                 }
                 for journal in journals
@@ -216,9 +198,7 @@ async def update_journal(
     journal_uid: str = Field(..., description="Journal UID to update"),
     summary: Optional[str] = Field(None, description="Journal entry title/summary"),
     description: Optional[str] = Field(None, description="Journal entry content"),
-    entry_date: Optional[str] = Field(
-        None, description="Journal entry date (ISO format)"
-    ),
+    entry_date: Optional[str] = Field(None, description="Journal entry date (ISO format)"),
     account: Optional[str] = Field(None, description="Account alias"),
     request_id: str = None,
 ) -> Dict[str, Any]:

@@ -3,7 +3,7 @@ Unit tests for advanced search functionality
 """
 
 from datetime import datetime, timedelta
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import pytest
 
@@ -150,9 +150,7 @@ class TestSearchEvents:
         )
 
         assert result["success"] is True
-        assert (
-            len(result["matches"]) == 2
-        )  # Both "Team Meeting" and "Zoom Meeting" match
+        assert len(result["matches"]) == 2  # Both "Team Meeting" and "Zoom Meeting" match
         # Check that both events with "Meeting" are found
         found_uids = {match["uid"] for match in result["matches"]}
         assert "evt-1" in found_uids  # "Team Meeting - Project Review"
@@ -311,9 +309,7 @@ class TestSearchEvents:
         mock_cal = Mock()
         mock_cal.uid = "test-calendar"
         mock_managers["calendar"].list_calendars.return_value = [mock_cal]
-        mock_managers["event"].get_events_range.side_effect = Exception(
-            "Calendar error"
-        )
+        mock_managers["event"].get_events_range.side_effect = Exception("Calendar error")
 
         # Direct function call
         result = await search_events.fn(

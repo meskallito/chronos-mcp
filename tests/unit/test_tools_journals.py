@@ -3,26 +3,19 @@ Comprehensive unit tests for chronos_mcp/tools/journals.py module
 Tests all MCP journal tool functions for 100% coverage with defensive programming patterns
 """
 
-import uuid
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, Mock, patch, AsyncMock
-from typing import Dict, Any
+from unittest.mock import Mock, patch
+
 import pytest
 
+from chronos_mcp.exceptions import CalendarNotFoundError, ChronosError, ValidationError
 from chronos_mcp.tools.journals import (
-    create_journal,
-    list_journals,
-    update_journal,
-    delete_journal,
-    register_journal_tools,
     _managers,
-)
-from chronos_mcp.exceptions import (
-    CalendarNotFoundError,
-    EventNotFoundError,
-    EventCreationError,
-    ValidationError,
-    ChronosError,
+    create_journal,
+    delete_journal,
+    list_journals,
+    register_journal_tools,
+    update_journal,
 )
 
 
@@ -181,9 +174,7 @@ class TestJournalTools:
     @pytest.mark.asyncio
     async def test_create_journal_unexpected_exception(self, setup_managers):
         """Test create_journal handles unexpected exceptions"""
-        _managers["journal_manager"].create_journal.side_effect = RuntimeError(
-            "Unexpected error"
-        )
+        _managers["journal_manager"].create_journal.side_effect = RuntimeError("Unexpected error")
 
         result = await create_journal.fn(
             calendar_uid="cal-123",
@@ -231,15 +222,11 @@ class TestJournalTools:
         assert "request_id" in result
 
     @pytest.mark.asyncio
-    async def test_list_journals_with_account_and_limit(
-        self, setup_managers, sample_journal
-    ):
+    async def test_list_journals_with_account_and_limit(self, setup_managers, sample_journal):
         """Test list_journals with account and limit parameters"""
         _managers["journal_manager"].list_journals.return_value = [sample_journal]
 
-        result = await list_journals.fn(
-            calendar_uid="cal-123", account="test_account", limit=10
-        )
+        result = await list_journals.fn(calendar_uid="cal-123", account="test_account", limit=10)
 
         assert len(result["journals"]) == 1
         _managers["journal_manager"].list_journals.assert_called_once_with(
@@ -247,9 +234,7 @@ class TestJournalTools:
         )
 
     @pytest.mark.asyncio
-    async def test_list_journals_limit_string_conversion(
-        self, setup_managers, sample_journal
-    ):
+    async def test_list_journals_limit_string_conversion(self, setup_managers, sample_journal):
         """Test list_journals converts string limit to int"""
         _managers["journal_manager"].list_journals.return_value = [sample_journal]
 
@@ -334,9 +319,7 @@ class TestJournalTools:
     @pytest.mark.asyncio
     async def test_list_journals_unexpected_exception(self, setup_managers):
         """Test list_journals handles unexpected exceptions"""
-        _managers["journal_manager"].list_journals.side_effect = RuntimeError(
-            "Unexpected error"
-        )
+        _managers["journal_manager"].list_journals.side_effect = RuntimeError("Unexpected error")
 
         result = await list_journals.fn(calendar_uid="cal-123", account=None, limit=50)
 
@@ -566,9 +549,7 @@ class TestJournalTools:
         """Test list_journals with limit as None"""
         _managers["journal_manager"].list_journals.return_value = [sample_journal]
 
-        result = await list_journals.fn(
-            calendar_uid="cal-123", account=None, limit=None
-        )
+        result = await list_journals.fn(calendar_uid="cal-123", account=None, limit=None)
 
         assert len(result["journals"]) == 1
         _managers["journal_manager"].list_journals.assert_called_once_with(

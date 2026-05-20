@@ -37,9 +37,7 @@ class CalendarManager:
         principal = self.accounts.get_principal(account_alias)
         if not principal:
             raise AccountNotFoundError(
-                account_alias
-                or self.accounts.config.config.default_account
-                or "default",
+                account_alias or self.accounts.config.config.default_account or "default",
                 request_id=request_id,
             )
 
@@ -56,8 +54,7 @@ class CalendarManager:
                     name=cal.name or "Unnamed Calendar",
                     description=None,  # Will need to fetch from properties
                     color=None,  # Will need to fetch from properties
-                    account_alias=account_alias
-                    or self.accounts.config.config.default_account,
+                    account_alias=account_alias or self.accounts.config.config.default_account,
                     url=str(cal.url),
                     read_only=False,  # Will need to check permissions
                 )
@@ -82,9 +79,7 @@ class CalendarManager:
         principal = self.accounts.get_principal(account_alias)
         if not principal:
             raise AccountNotFoundError(
-                account_alias
-                or self.accounts.config.config.default_account
-                or "default",
+                account_alias or self.accounts.config.config.default_account or "default",
                 request_id=request_id,
             )
 
@@ -100,8 +95,7 @@ class CalendarManager:
                 name=name,
                 description=description,
                 color=color,
-                account_alias=account_alias
-                or self.accounts.config.config.default_account,
+                account_alias=account_alias or self.accounts.config.config.default_account,
                 url=str(cal.url),
                 read_only=False,
             )
@@ -111,9 +105,7 @@ class CalendarManager:
                 f"Authorization error creating calendar '{name}': {e}",
                 extra={"request_id": request_id},
             )
-            raise CalendarCreationError(
-                name, "Authorization failed", request_id=request_id
-            )
+            raise CalendarCreationError(name, "Authorization failed", request_id=request_id)
         except Exception as e:
             logger.error(
                 f"Error creating calendar '{name}': {e}",
@@ -133,9 +125,7 @@ class CalendarManager:
         principal = self.accounts.get_principal(account_alias)
         if not principal:
             raise AccountNotFoundError(
-                account_alias
-                or self.accounts.config.config.default_account
-                or "default",
+                account_alias or self.accounts.config.config.default_account or "default",
                 request_id=request_id,
             )
 
@@ -156,9 +146,7 @@ class CalendarManager:
                     return True
 
             # Calendar not found
-            raise CalendarNotFoundError(
-                calendar_uid, account_alias, request_id=request_id
-            )
+            raise CalendarNotFoundError(calendar_uid, account_alias, request_id=request_id)
 
         except CalendarNotFoundError:
             raise  # Re-raise our own exception
@@ -167,9 +155,7 @@ class CalendarManager:
                 f"Authorization error deleting calendar '{calendar_uid}': {e}",
                 extra={"request_id": request_id},
             )
-            raise CalendarDeletionError(
-                calendar_uid, "Authorization failed", request_id=request_id
-            )
+            raise CalendarDeletionError(calendar_uid, "Authorization failed", request_id=request_id)
         except Exception as e:
             logger.error(
                 f"Error deleting calendar '{calendar_uid}': {e}",

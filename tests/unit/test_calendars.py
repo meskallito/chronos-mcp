@@ -55,9 +55,7 @@ class TestCalendarManager:
 
         assert "test_account" in str(exc_info.value)
 
-    def test_list_calendars_success(
-        self, mock_account_manager, mock_principal, mock_calendar
-    ):
+    def test_list_calendars_success(self, mock_account_manager, mock_principal, mock_calendar):
         """Test successful calendar listing"""
         mock_account_manager.get_principal.return_value = mock_principal
         mock_calendar2 = Mock()
@@ -143,9 +141,7 @@ class TestCalendarManager:
             name="New Calendar", cal_id="new_calendar"
         )
 
-    def test_create_calendar_with_default_account(
-        self, mock_account_manager, mock_principal
-    ):
+    def test_create_calendar_with_default_account(self, mock_account_manager, mock_principal):
         """Test creating calendar with default account"""
         mock_account_manager.get_principal.return_value = mock_principal
         created_cal = Mock()
@@ -188,9 +184,7 @@ class TestCalendarManager:
         assert "test_account" in str(exc_info.value)
         mock_account_manager.get_principal.assert_called_once_with("test_account")
 
-    def test_delete_calendar_success(
-        self, mock_account_manager, mock_principal, mock_calendar
-    ):
+    def test_delete_calendar_success(self, mock_account_manager, mock_principal, mock_calendar):
         """Test successful calendar deletion"""
         mock_account_manager.get_principal.return_value = mock_principal
         mock_principal.calendars.return_value = [mock_calendar]
@@ -221,9 +215,7 @@ class TestCalendarManager:
         assert "test-calendar" in str(exc_info.value)
         other_cal.delete.assert_not_called()
 
-    def test_delete_calendar_exception(
-        self, mock_account_manager, mock_principal, mock_calendar
-    ):
+    def test_delete_calendar_exception(self, mock_account_manager, mock_principal, mock_calendar):
         """Test calendar deletion with exception"""
         mock_account_manager.get_principal.return_value = mock_principal
         mock_principal.calendars.return_value = [mock_calendar]
@@ -249,9 +241,7 @@ class TestCalendarManager:
         assert result is None
         mock_account_manager.get_principal.assert_called_once_with("test_account")
 
-    def test_get_calendar_success(
-        self, mock_account_manager, mock_principal, mock_calendar
-    ):
+    def test_get_calendar_success(self, mock_account_manager, mock_principal, mock_calendar):
         """Test successful calendar retrieval"""
         mock_account_manager.get_principal.return_value = mock_principal
         mock_principal.calendars.return_value = [mock_calendar]

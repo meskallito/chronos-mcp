@@ -24,9 +24,7 @@ def handle_tool_errors(func):
             return await func(*args, **kwargs)
         except ChronosError as e:
             e.request_id = request_id
-            logger.error(
-                f"Request {request_id} failed: {ErrorSanitizer.sanitize_message(str(e))}"
-            )
+            logger.error(f"Request {request_id} failed: {ErrorSanitizer.sanitize_message(str(e))}")
             return {
                 "success": False,
                 "error": ErrorSanitizer.sanitize_message(str(e)),

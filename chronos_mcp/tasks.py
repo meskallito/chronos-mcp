@@ -54,13 +54,9 @@ class TaskManager:
         """Create a new task - raises exceptions on failure"""
         request_id = request_id or str(uuid.uuid4())
 
-        calendar = self.calendars.get_calendar(
-            calendar_uid, account_alias, request_id=request_id
-        )
+        calendar = self.calendars.get_calendar(calendar_uid, account_alias, request_id=request_id)
         if not calendar:
-            raise CalendarNotFoundError(
-                calendar_uid, account_alias, request_id=request_id
-            )
+            raise CalendarNotFoundError(calendar_uid, account_alias, request_id=request_id)
 
         try:
             cal = iCalendar()
@@ -97,19 +93,19 @@ class TaskManager:
                     extra={"request_id": request_id},
                 )
                 try:
-                    caldav_task = calendar.save_todo(ical_data)
+                    calendar.save_todo(ical_data)
                 except Exception as e:
                     logger.warning(
                         f"calendar.save_todo() failed: {e}, falling back to save_event()",
                         extra={"request_id": request_id},
                     )
-                    caldav_task = calendar.save_event(ical_data)
+                    calendar.save_event(ical_data)
             else:
                 logger.debug(
                     "Server doesn't support calendar.save_todo(), using calendar.save_event()",
                     extra={"request_id": request_id},
                 )
-                caldav_task = calendar.save_event(ical_data)
+                calendar.save_event(ical_data)
 
             task_model = Task(
                 uid=task_uid,
@@ -131,9 +127,7 @@ class TaskManager:
                 f"Authorization error creating task '{summary}': {e}",
                 extra={"request_id": request_id},
             )
-            raise EventCreationError(
-                summary, "Authorization failed", request_id=request_id
-            )
+            raise EventCreationError(summary, "Authorization failed", request_id=request_id)
         except Exception as e:
             logger.error(
                 f"Error creating task '{summary}': {e}",
@@ -151,19 +145,13 @@ class TaskManager:
         """Get a specific task by UID"""
         request_id = request_id or str(uuid.uuid4())
 
-        calendar = self.calendars.get_calendar(
-            calendar_uid, account_alias, request_id=request_id
-        )
+        calendar = self.calendars.get_calendar(calendar_uid, account_alias, request_id=request_id)
         if not calendar:
-            raise CalendarNotFoundError(
-                calendar_uid, account_alias, request_id=request_id
-            )
+            raise CalendarNotFoundError(calendar_uid, account_alias, request_id=request_id)
 
         try:
             # Use utility function to find task with automatic fallback
-            caldav_task = get_item_with_fallback(
-                calendar, task_uid, "task", request_id=request_id
-            )
+            caldav_task = get_item_with_fallback(calendar, task_uid, "task", request_id=request_id)
             return self._parse_caldav_task(caldav_task, calendar_uid, account_alias)
         except ValueError:
             # get_item_with_fallback raises ValueError when not found
@@ -188,13 +176,9 @@ class TaskManager:
         """List all tasks in a calendar"""
         request_id = request_id or str(uuid.uuid4())
 
-        calendar = self.calendars.get_calendar(
-            calendar_uid, account_alias, request_id=request_id
-        )
+        calendar = self.calendars.get_calendar(calendar_uid, account_alias, request_id=request_id)
         if not calendar:
-            raise CalendarNotFoundError(
-                calendar_uid, account_alias, request_id=request_id
-            )
+            raise CalendarNotFoundError(calendar_uid, account_alias, request_id=request_id)
 
         tasks = []
         try:
@@ -205,7 +189,7 @@ class TaskManager:
                         "Using calendar.todos() for server-side filtering",
                         extra={"request_id": request_id},
                     )
-                    todos = calendar.todos()
+                    todos = calendar.todos(include_completed=True)
 
                     for caldav_todo in todos:
                         task_data = self._parse_caldav_task(
@@ -224,15 +208,14 @@ class TaskManager:
             else:
                 # Fallback method for servers without todos() support
                 logger.debug(
-                    "Server doesn't support calendar.todos(), using calendar.events() with client-side filtering",
+                    "Server doesn't support calendar.todos(),"
+                    " using calendar.events() with client-side filtering",
                     extra={"request_id": request_id},
                 )
                 events = calendar.events()
 
                 for caldav_event in events:
-                    task_data = self._parse_caldav_task(
-                        caldav_event, calendar_uid, account_alias
-                    )
+                    task_data = self._parse_caldav_task(caldav_event, calendar_uid, account_alias)
                     if task_data:
                         tasks.append(task_data)
 
@@ -258,9 +241,7 @@ class TaskManager:
                         extra={"request_id": request_id},
                     )
             else:
-                logger.error(
-                    f"Error listing tasks: {e}", extra={"request_id": request_id}
-                )
+                logger.error(f"Error listing tasks: {e}", extra={"request_id": request_id})
 
         # Filter by status if requested
         if status_filter:
@@ -289,13 +270,9 @@ class TaskManager:
         """Update an existing task - raises exceptions on failure"""
         request_id = request_id or str(uuid.uuid4())
 
-        calendar = self.calendars.get_calendar(
-            calendar_uid, account_alias, request_id=request_id
-        )
+        calendar = self.calendars.get_calendar(calendar_uid, account_alias, request_id=request_id)
         if not calendar:
-            raise CalendarNotFoundError(
-                calendar_uid, account_alias, request_id=request_id
-            )
+            raise CalendarNotFoundError(calendar_uid, account_alias, request_id=request_id)
 
         try:
             # Use utility function to find task with automatic fallback
@@ -397,19 +374,13 @@ class TaskManager:
         """Delete a task by UID - raises exceptions on failure"""
         request_id = request_id or str(uuid.uuid4())
 
-        calendar = self.calendars.get_calendar(
-            calendar_uid, account_alias, request_id=request_id
-        )
+        calendar = self.calendars.get_calendar(calendar_uid, account_alias, request_id=request_id)
         if not calendar:
-            raise CalendarNotFoundError(
-                calendar_uid, account_alias, request_id=request_id
-            )
+            raise CalendarNotFoundError(calendar_uid, account_alias, request_id=request_id)
 
         try:
             # Use utility function to find task with automatic fallback
-            task = get_item_with_fallback(
-                calendar, task_uid, "task", request_id=request_id
-            )
+            task = get_item_with_fallback(calendar, task_uid, "task", request_id=request_id)
             task.delete()
             logger.info(
                 f"Deleted task '{task_uid}'",
@@ -427,9 +398,7 @@ class TaskManager:
                 f"Authorization error deleting task '{task_uid}': {e}",
                 extra={"request_id": request_id},
             )
-            raise EventDeletionError(
-                task_uid, "Authorization failed", request_id=request_id
-            )
+            raise EventDeletionError(task_uid, "Authorization failed", request_id=request_id)
         except Exception as e:
             logger.error(
                 f"Error deleting task '{task_uid}': {e}",
@@ -505,9 +474,7 @@ class TaskManager:
                         percent_complete=percent_complete,
                         related_to=related_to,
                         calendar_uid=calendar_uid,
-                        account_alias=account_alias
-                        or self._get_default_account()
-                        or "default",
+                        account_alias=account_alias or self._get_default_account() or "default",
                     )
 
                     return task

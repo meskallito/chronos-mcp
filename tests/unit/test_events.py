@@ -48,9 +48,7 @@ class TestEventManager:
         mgr = EventManager(mock_calendar_manager)
         assert mgr.calendars == mock_calendar_manager
 
-    def test_create_event_calendar_not_found(
-        self, mock_calendar_manager, sample_event_data
-    ):
+    def test_create_event_calendar_not_found(self, mock_calendar_manager, sample_event_data):
         """Test creating event when calendar not found"""
         mock_calendar_manager.get_calendar.return_value = None
         mgr = EventManager(mock_calendar_manager)
@@ -90,7 +88,36 @@ class TestEventManager:
         mock_calendar.save_event.assert_called_once()
         ical_data = mock_calendar.save_event.call_args[0][0]
         assert "BEGIN:VCALENDAR" in ical_data
-        assert "Test Meeting" in ical_data
+
+    @patch("chronos_mcp.events.uuid.uuid4")
+    def test_create_event_preserves_timezone_as_utc(
+        self, mock_uuid, mock_calendar_manager, mock_calendar
+    ):
+        """Test that non-UTC timezone is converted to UTC in iCal output (issue #17)"""
+        mock_uuid.return_value = "evt-tz-test"
+        mock_calendar_manager.get_calendar.return_value = mock_calendar
+        mock_calendar.save_event.return_value = Mock()
+
+        mgr = EventManager(mock_calendar_manager)
+
+        eastern = pytz.timezone("US/Eastern")
+        start_local = eastern.localize(datetime(2025, 7, 10, 14, 0))
+        end_local = eastern.localize(datetime(2025, 7, 10, 15, 0))
+
+        result = mgr.create_event(
+            calendar_uid="cal-123",
+            summary="Timezone Test",
+            start=start_local,
+            end=end_local,
+        )
+
+        assert result is not None
+        ical_data = mock_calendar.save_event.call_args[0][0]
+        assert "BEGIN:VCALENDAR" in ical_data
+        assert "SUMMARY:Timezone Test" in ical_data
+        # DTSTART and DTEND should be in UTC (14:00 EDT = 18:00 UTC)
+        assert "DTSTART:20250710T180000Z" in ical_data
+        assert "DTEND:20250710T190000Z" in ical_data
 
     def test_create_event_with_attendees(
         self, mock_calendar_manager, mock_calendar, sample_event_data
@@ -126,9 +153,7 @@ class TestEventManager:
         assert "ATTENDEE" in ical_data
         assert "mailto:user1@example.com" in ical_data
 
-    def test_create_event_with_alarm(
-        self, mock_calendar_manager, mock_calendar, sample_event_data
-    ):
+    def test_create_event_with_alarm(self, mock_calendar_manager, mock_calendar, sample_event_data):
         """Test creating event with alarm"""
         mock_calendar_manager.get_calendar.return_value = mock_calendar
         sample_event_data["alarm_minutes"] = 15
@@ -180,9 +205,7 @@ class TestEventManager:
         assert result is not None
         assert result.all_day is True
 
-    def test_create_event_exception(
-        self, mock_calendar_manager, mock_calendar, sample_event_data
-    ):
+    def test_create_event_exception(self, mock_calendar_manager, mock_calendar, sample_event_data):
         """Test event creation with exception"""
         mock_calendar_manager.get_calendar.return_value = mock_calendar
         mock_calendar.save_event.side_effect = Exception("CalDAV error")
@@ -255,9 +278,7 @@ END:VEVENT"""
         assert result[1].description == "Test description"
         assert result[1].location == "Room B"
 
-    def test_get_events_range_with_attendees(
-        self, mock_calendar_manager, mock_calendar
-    ):
+    def test_get_events_range_with_attendees(self, mock_calendar_manager, mock_calendar):
         """Test getting events with attendees"""
         mock_calendar_manager.get_calendar.return_value = mock_calendar
 
@@ -315,9 +336,7 @@ END:VEVENT"""
             mgr.delete_event("cal-123", "evt-123")
 
         assert "cal-123" in str(exc_info.value)
-        mock_calendar_manager.get_calendar.assert_called_once_with(
-            "cal-123", None, request_id=ANY
-        )
+        mock_calendar_manager.get_calendar.assert_called_once_with("cal-123", None, request_id=ANY)
 
     def test_create_event_with_valid_rrule(self, mock_calendar_manager, mock_calendar):
         """Test creating event with valid RRULE"""
@@ -344,9 +363,7 @@ END:VEVENT"""
         ical_data = mock_calendar.save_event.call_args[0][0]
         assert "RRULE:FREQ=DAILY;BYDAY=MO,TU,WE,TH,FR" in ical_data
 
-    def test_create_event_with_invalid_rrule(
-        self, mock_calendar_manager, mock_calendar
-    ):
+    def test_create_event_with_invalid_rrule(self, mock_calendar_manager, mock_calendar):
         """Test creating event with invalid RRULE raises error"""
         from chronos_mcp.exceptions import EventCreationError
 
@@ -394,7 +411,7 @@ END:VEVENT"""
         mgr = EventManager(mock_calendar_manager)
 
         # Update event
-        updated_event = mgr.update_event(
+        updated_event = mgr.update_event(  # noqa: F841
             calendar_uid="cal-123",
             event_uid="evt-123",
             summary="Updated Title",
@@ -434,9 +451,7 @@ END:VEVENT"""
         mgr = EventManager(mock_calendar_manager)
 
         # Update only location
-        mgr.update_event(
-            calendar_uid="cal-123", event_uid="evt-123", location="Conference Room B"
-        )
+        mgr.update_event(calendar_uid="cal-123", event_uid="evt-123", location="Conference Room B")
 
         # Verify save was called
         mock_caldav_event.save.assert_called_once()
@@ -448,9 +463,7 @@ END:VEVENT"""
         assert "Conference Room B" in saved_data
         assert "FREQ=WEEKLY;BYDAY=MO" in saved_data
 
-    def test_update_event_remove_optional_fields(
-        self, mock_calendar_manager, mock_calendar
-    ):
+    def test_update_event_remove_optional_fields(self, mock_calendar_manager, mock_calendar):
         """Test removing optional fields by setting them to empty string"""
 
         mock_calendar_manager.get_calendar.return_value = mock_calendar
@@ -496,9 +509,7 @@ END:VEVENT"""
         mgr = EventManager(mock_calendar_manager)
 
         with pytest.raises(EventNotFoundError) as exc_info:
-            mgr.update_event(
-                calendar_uid="cal-123", event_uid="non-existent", summary="New Title"
-            )
+            mgr.update_event(calendar_uid="cal-123", event_uid="non-existent", summary="New Title")
 
         assert "non-existent" in str(exc_info.value)
 

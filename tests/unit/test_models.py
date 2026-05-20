@@ -28,9 +28,7 @@ class TestAccount:
 
     def test_account_without_password(self):
         """Test creating account without password"""
-        account = Account(
-            alias="no_pass", url="https://caldav.example.com", username="user"
-        )
+        account = Account(alias="no_pass", url="https://caldav.example.com", username="user")
         assert account.password is None
 
     def test_account_url_validation(self):

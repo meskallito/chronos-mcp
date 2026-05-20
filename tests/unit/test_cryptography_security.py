@@ -7,8 +7,6 @@ issues when updating to newer versions.
 """
 
 import pytest
-import sys
-from unittest.mock import patch, MagicMock
 
 
 # Test version information
@@ -37,7 +35,8 @@ def test_cryptography_version_check():
 def test_keyring_cryptography_integration():
     """Test that keyring works with current cryptography version."""
     try:
-        import keyring
+        import keyring  # noqa: F401 - imported to verify availability
+
         from chronos_mcp.credentials import CredentialManager
 
         # Test that credential manager can be instantiated
@@ -131,17 +130,19 @@ def test_future_cryptography_version_compatibility():
         # Version 46.0.1 is the latest as of this test
         recommended_min = version.parse("45.0.0")
 
-        assert (
-            current_version >= recommended_min
-        ), f"Cryptography version {current_version} is older than recommended minimum {recommended_min}"
+        assert current_version >= recommended_min, (
+            f"Cryptography version {current_version} is older than "
+            f"recommended minimum {recommended_min}"
+        )
 
         # This test will help us detect if a future update breaks compatibility
         # by testing basic cryptographic operations that keyring might use
+        import base64
+        import os
+
         from cryptography.fernet import Fernet
         from cryptography.hazmat.primitives import hashes
         from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-        import os
-        import base64
 
         # Test basic encryption/decryption (similar to what keyring backends might do)
         password = b"test_password"

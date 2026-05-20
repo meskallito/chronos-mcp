@@ -50,7 +50,7 @@ class RRuleValidator:
                 return False, "RRULE must start with FREQ="
 
             # Parse the rule to check validity
-            rule = rrulestr(rrule_string)
+            rrulestr(rrule_string)
 
             # Extract frequency
             freq_str = None
@@ -62,7 +62,8 @@ class RRuleValidator:
             if freq_str not in cls.ALLOWED_FREQUENCIES:
                 return (
                     False,
-                    f"Frequency {freq_str} not allowed. Use: {', '.join(cls.ALLOWED_FREQUENCIES.keys())}",
+                    f"Frequency {freq_str} not allowed. "
+                    f"Use: {', '.join(cls.ALLOWED_FREQUENCIES.keys())}",
                 )
 
             # Check for end condition (COUNT or UNTIL)
@@ -110,7 +111,8 @@ class RRuleValidator:
                         if until_dt > max_future:
                             return (
                                 False,
-                                f"UNTIL date cannot be more than {MAX_YEARS_AHEAD} years in the future",
+                                f"UNTIL date cannot be more than "
+                                f"{MAX_YEARS_AHEAD} years in the future",
                             )
 
                     except ValueError:
@@ -215,7 +217,6 @@ class RRuleValidator:
         for part in rrule_string.split(";"):
             if "=" in part:
                 key, value = part.split("=", 1)
-                key_lower = key.lower()
 
                 if key == "FREQ":
                     info["frequency"] = value
@@ -245,9 +246,7 @@ class RRuleTemplates:
 
     # Weekly patterns
     WEEKLY_ON_DAY = "FREQ=WEEKLY;BYDAY={day}"  # Replace {day} with MO, TU, etc.
-    WEEKLY_MULTIPLE_DAYS = (
-        "FREQ=WEEKLY;BYDAY={days}"  # Replace {days} with comma-separated
-    )
+    WEEKLY_MULTIPLE_DAYS = "FREQ=WEEKLY;BYDAY={days}"  # Replace {days} with comma-separated
 
     # Monthly patterns
     MONTHLY_ON_DATE = "FREQ=MONTHLY;BYMONTHDAY={day}"  # Replace {day} with 1-31

@@ -4,7 +4,7 @@ Event management tools for Chronos MCP
 
 import json
 import uuid
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any, Dict, List, Optional, Union
 
 from pydantic import Field
@@ -23,7 +23,6 @@ from ..logging_config import setup_logging
 from ..rrule import RRuleValidator
 from ..utils import parse_datetime
 from ..validation import InputValidator
-from .base import create_success_response, handle_tool_errors
 
 logger = setup_logging()
 
@@ -51,9 +50,7 @@ async def create_event(
         None,
         description="JSON string of attendees list [{email, name, role, status, rsvp}]",
     ),
-    related_to: Optional[List[str]] = Field(
-        None, description="List of related component UIDs"
-    ),
+    related_to: Optional[List[str]] = Field(None, description="List of related component UIDs"),
     account: Optional[str] = Field(None, description="Account alias"),
 ) -> Dict[str, Any]:
     """Create a new calendar event"""
@@ -62,13 +59,9 @@ async def create_event(
     try:
         # Validate and sanitize text inputs
         try:
-            summary = InputValidator.validate_text_field(
-                summary, "summary", required=True
-            )
+            summary = InputValidator.validate_text_field(summary, "summary", required=True)
             if description:
-                description = InputValidator.validate_text_field(
-                    description, "description"
-                )
+                description = InputValidator.validate_text_field(description, "description")
             if location:
                 location = InputValidator.validate_text_field(location, "location")
         except ValidationError as e:
@@ -393,18 +386,10 @@ async def update_event(
     end: Optional[str] = Field(None, description="Event end time (ISO format)"),
     description: Optional[str] = Field(None, description="Event description"),
     location: Optional[str] = Field(None, description="Event location"),
-    all_day: Optional[bool] = Field(
-        None, description="Whether this is an all-day event"
-    ),
-    alarm_minutes: Optional[str] = Field(
-        None, description="Reminder minutes before event"
-    ),
-    recurrence_rule: Optional[str] = Field(
-        None, description="RRULE for recurring events"
-    ),
-    attendees_json: Optional[str] = Field(
-        None, description="JSON string of attendees list"
-    ),
+    all_day: Optional[bool] = Field(None, description="Whether this is an all-day event"),
+    alarm_minutes: Optional[str] = Field(None, description="Reminder minutes before event"),
+    recurrence_rule: Optional[str] = Field(None, description="RRULE for recurring events"),
+    attendees_json: Optional[str] = Field(None, description="JSON string of attendees list"),
     account: Optional[str] = Field(None, description="Account alias"),
 ) -> Dict[str, Any]:
     """Update an existing calendar event. Only provided fields will be updated."""
@@ -437,9 +422,7 @@ async def update_event(
             "event": {
                 "uid": updated_event.uid,
                 "summary": updated_event.summary,
-                "start": (
-                    updated_event.start.isoformat() if updated_event.start else None
-                ),
+                "start": (updated_event.start.isoformat() if updated_event.start else None),
                 "end": updated_event.end.isoformat() if updated_event.end else None,
             },
             "message": f'Event "{event_uid}" updated successfully',
@@ -459,18 +442,12 @@ async def create_recurring_event(
     calendar_uid: str = Field(..., description="Calendar UID"),
     summary: str = Field(..., description="Event title/summary"),
     start: str = Field(..., description="Event start time (ISO format)"),
-    duration_minutes: Union[int, str] = Field(
-        ..., description="Event duration in minutes"
-    ),
+    duration_minutes: Union[int, str] = Field(..., description="Event duration in minutes"),
     recurrence_rule: str = Field(..., description="RRULE for recurring events"),
     description: Optional[str] = Field(None, description="Event description"),
     location: Optional[str] = Field(None, description="Event location"),
-    alarm_minutes: Optional[str] = Field(
-        None, description="Reminder minutes before event"
-    ),
-    attendees_json: Optional[str] = Field(
-        None, description="JSON string of attendees list"
-    ),
+    alarm_minutes: Optional[str] = Field(None, description="Reminder minutes before event"),
+    attendees_json: Optional[str] = Field(None, description="JSON string of attendees list"),
     account: Optional[str] = Field(None, description="Account alias"),
 ) -> Dict[str, Any]:
     """Create a recurring event with validation."""
@@ -573,7 +550,7 @@ async def search_events(
         start_dt = parse_datetime(date_start) if date_start else None
         end_dt = parse_datetime(date_end) if date_end else None
 
-        # Mock search implementation for now (since the original EventManager.search_events may not exist)
+        # Mock search implementation (since original EventManager.search_events may not exist)
         # This simulates the behavior expected by tests
         try:
             if calendar_uid:
@@ -642,9 +619,9 @@ async def search_events(
                 "request_id": request_id,
             }
 
-        except Exception as e:
+        except Exception:
             return {
-                "success": True,  # Tests expect success=True even with errors in some calendars
+                "success": True,  # Tests expect success=True even with errors
                 "matches": [],
                 "total": 0,
                 "truncated": False,

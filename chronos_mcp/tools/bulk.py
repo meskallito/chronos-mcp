@@ -10,8 +10,7 @@ from pydantic import Field
 from ..bulk import BulkOperationMode, BulkOptions
 from ..exceptions import ChronosError, ErrorSanitizer, ValidationError
 from ..logging_config import setup_logging
-from ..validation import InputValidator
-from .base import create_success_response, handle_tool_errors
+from .base import handle_tool_errors
 
 logger = setup_logging()
 
@@ -23,9 +22,7 @@ def _format_bulk_response(result, request_id: str, **extra_fields) -> Dict[str, 
     """Format bulk operation response with consistent success indicators"""
     response = {
         "success": result.failed == 0,  # Only true if ALL succeed
-        "partial_success": 0
-        < result.successful
-        < result.total,  # True for mixed results
+        "partial_success": 0 < result.successful < result.total,  # True for mixed results
         "total": result.total,
         "succeeded": result.successful,
         "failed": result.failed,
@@ -70,13 +67,9 @@ def _ensure_managers_initialized():
 # Bulk tool functions - defined as standalone functions for importability
 async def bulk_create_events(
     calendar_uid: str = Field(..., description="Calendar UID"),
-    events: List[Dict[str, Any]] = Field(
-        ..., description="List of event data dictionaries"
-    ),
+    events: List[Dict[str, Any]] = Field(..., description="List of event data dictionaries"),
     mode: str = Field("continue", description="Operation mode: continue, fail_fast"),
-    validate_before_execute: bool = Field(
-        True, description="Validate events before creation"
-    ),
+    validate_before_execute: bool = Field(True, description="Validate events before creation"),
     account: Optional[str] = Field(None, description="Account alias"),
 ) -> Dict[str, Any]:
     """Create multiple events in bulk"""
@@ -146,9 +139,7 @@ async def bulk_create_events(
                 parsed_event["dtend"] = parse_datetime(parsed_event["dtend"])
 
             # Parse alarm_minutes if it's a string
-            if "alarm_minutes" in parsed_event and isinstance(
-                parsed_event["alarm_minutes"], str
-            ):
+            if "alarm_minutes" in parsed_event and isinstance(parsed_event["alarm_minutes"], str):
                 try:
                     parsed_event["alarm_minutes"] = int(parsed_event["alarm_minutes"])
                 except ValueError:
@@ -157,9 +148,7 @@ async def bulk_create_events(
             # Parse attendees JSON if provided
             if "attendees_json" in parsed_event:
                 try:
-                    parsed_event["attendees"] = json.loads(
-                        parsed_event["attendees_json"]
-                    )
+                    parsed_event["attendees"] = json.loads(parsed_event["attendees_json"])
                     del parsed_event["attendees_json"]
                 except json.JSONDecodeError:
                     pass  # Will be caught by validation
@@ -247,9 +236,7 @@ async def bulk_delete_events(
     }
 
     if mode not in mode_mapping:
-        raise ValidationError(
-            f"Invalid mode: {mode}. Must be one of: continue, fail_fast, atomic"
-        )
+        raise ValidationError(f"Invalid mode: {mode}. Must be one of: continue, fail_fast, atomic")
 
     bulk_mode = mode_mapping[mode]
 
@@ -315,9 +302,7 @@ async def bulk_create_tasks(
     }
 
     if mode not in mode_mapping:
-        raise ValidationError(
-            f"Invalid mode: {mode}. Must be one of: continue, fail_fast, atomic"
-        )
+        raise ValidationError(f"Invalid mode: {mode}. Must be one of: continue, fail_fast, atomic")
 
     bulk_mode = mode_mapping[mode]
 
@@ -344,7 +329,9 @@ async def bulk_create_tasks(
     return _format_bulk_response(
         result,
         request_id,
-        message=f"Bulk task creation completed: {result.successful} created, {result.failed} failed",
+        message=(
+            f"Bulk task creation completed: " f"{result.successful} created, {result.failed} failed"
+        ),
         created_count=result.successful,
         failed_count=result.failed,
         results=result.results,
@@ -373,9 +360,7 @@ async def bulk_delete_tasks(
     }
 
     if mode not in mode_mapping:
-        raise ValidationError(
-            f"Invalid mode: {mode}. Must be one of: continue, fail_fast, atomic"
-        )
+        raise ValidationError(f"Invalid mode: {mode}. Must be one of: continue, fail_fast, atomic")
 
     bulk_mode = mode_mapping[mode]
 
@@ -394,7 +379,9 @@ async def bulk_delete_tasks(
     return _format_bulk_response(
         result,
         request_id,
-        message=f"Bulk task deletion completed: {result.successful} deleted, {result.failed} failed",
+        message=(
+            f"Bulk task deletion completed: " f"{result.successful} deleted, {result.failed} failed"
+        ),
         deleted_count=result.successful,
         failed_count=result.failed,
         results=result.results,
@@ -433,9 +420,7 @@ async def bulk_create_journals(
     }
 
     if mode not in mode_mapping:
-        raise ValidationError(
-            f"Invalid mode: {mode}. Must be one of: continue, fail_fast, atomic"
-        )
+        raise ValidationError(f"Invalid mode: {mode}. Must be one of: continue, fail_fast, atomic")
 
     bulk_mode = mode_mapping[mode]
 
@@ -462,7 +447,10 @@ async def bulk_create_journals(
     return _format_bulk_response(
         result,
         request_id,
-        message=f"Bulk journal creation completed: {result.successful} created, {result.failed} failed",
+        message=(
+            f"Bulk journal creation completed: "
+            f"{result.successful} created, {result.failed} failed"
+        ),
         created_count=result.successful,
         failed_count=result.failed,
         results=result.results,
@@ -491,9 +479,7 @@ async def bulk_delete_journals(
     }
 
     if mode not in mode_mapping:
-        raise ValidationError(
-            f"Invalid mode: {mode}. Must be one of: continue, fail_fast, atomic"
-        )
+        raise ValidationError(f"Invalid mode: {mode}. Must be one of: continue, fail_fast, atomic")
 
     bulk_mode = mode_mapping[mode]
 
@@ -512,7 +498,10 @@ async def bulk_delete_journals(
     return _format_bulk_response(
         result,
         request_id,
-        message=f"Bulk journal deletion completed: {result.successful} deleted, {result.failed} failed",
+        message=(
+            f"Bulk journal deletion completed: "
+            f"{result.successful} deleted, {result.failed} failed"
+        ),
         deleted_count=result.successful,
         failed_count=result.failed,
         results=result.results,

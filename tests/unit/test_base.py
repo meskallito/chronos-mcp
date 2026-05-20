@@ -55,10 +55,12 @@ class TestHandleToolErrors:
 
         # CRITICAL SECURITY CHECK: Sensitive data MUST be redacted
         error_message = result["error"]
-        assert "password=mysecret123" not in error_message, \
-            "SECURITY FAILURE: Password leaked in generic exception"
-        assert "token=abc-xyz-789" not in error_message, \
-            "SECURITY FAILURE: Token leaked in generic exception"
+        assert (
+            "password=mysecret123" not in error_message
+        ), "SECURITY FAILURE: Password leaked in generic exception"
+        assert (
+            "token=abc-xyz-789" not in error_message
+        ), "SECURITY FAILURE: Token leaked in generic exception"
 
         # Should contain sanitized versions
         assert "password=***" in error_message or "password" not in error_message.lower()
@@ -78,8 +80,9 @@ class TestHandleToolErrors:
         error_message = result["error"]
 
         # CRITICAL: URL credentials must be redacted
-        assert "user:pass" not in error_message, \
-            "SECURITY FAILURE: URL credentials leaked in generic exception"
+        assert (
+            "user:pass" not in error_message
+        ), "SECURITY FAILURE: URL credentials leaked in generic exception"
         assert "***:***@" in error_message or "user" not in error_message
 
     @pytest.mark.asyncio
@@ -96,8 +99,9 @@ class TestHandleToolErrors:
         error_message = result["error"]
 
         # CRITICAL: API key must be redacted
-        assert "sk_live_abc123xyz789" not in error_message, \
-            "SECURITY FAILURE: API key leaked in generic exception"
+        assert (
+            "sk_live_abc123xyz789" not in error_message
+        ), "SECURITY FAILURE: API key leaked in generic exception"
         assert "api_key=***" in error_message or "api_key" not in error_message
 
     @pytest.mark.asyncio
@@ -132,4 +136,5 @@ class TestHandleToolErrors:
         assert "received_id" in result
         # Verify it's a valid UUID string
         import uuid
+
         uuid.UUID(result["received_id"])  # Will raise if invalid

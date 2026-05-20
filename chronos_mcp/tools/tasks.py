@@ -12,7 +12,6 @@ from ..exceptions import (
     ChronosError,
     ErrorSanitizer,
     EventCreationError,
-    EventNotFoundError,
     ValidationError,
 )
 from ..logging_config import setup_logging
@@ -40,9 +39,7 @@ async def create_task(
         "NEEDS-ACTION",
         description="Task status (NEEDS-ACTION, IN-PROCESS, COMPLETED, CANCELLED)",
     ),
-    related_to: Optional[List[str]] = Field(
-        None, description="List of related component UIDs"
-    ),
+    related_to: Optional[List[str]] = Field(None, description="List of related component UIDs"),
     account: Optional[str] = Field(None, description="Account alias"),
 ) -> Dict[str, Any]:
     """Create a new task"""
@@ -63,13 +60,9 @@ async def create_task(
     try:
         # Validate and sanitize text inputs
         try:
-            summary = InputValidator.validate_text_field(
-                summary, "summary", required=True
-            )
+            summary = InputValidator.validate_text_field(summary, "summary", required=True)
             if description:
-                description = InputValidator.validate_text_field(
-                    description, "description"
-                )
+                description = InputValidator.validate_text_field(description, "description")
         except ValidationError as e:
             return {
                 "success": False,
@@ -98,7 +91,10 @@ async def create_task(
         except ValueError:
             return {
                 "success": False,
-                "error": f"Invalid status: {status}. Must be one of: NEEDS-ACTION, IN-PROCESS, COMPLETED, CANCELLED",
+                "error": (
+                    f"Invalid status: {status}. "
+                    "Must be one of: NEEDS-ACTION, IN-PROCESS, COMPLETED, CANCELLED"
+                ),
                 "error_code": "VALIDATION_ERROR",
                 "request_id": request_id,
             }
@@ -194,7 +190,10 @@ async def list_tasks(
             except ValueError:
                 return {
                     "success": False,
-                    "error": f"Invalid status filter: {status_filter}. Must be one of: NEEDS-ACTION, IN-PROCESS, COMPLETED, CANCELLED",
+                    "error": (
+                        f"Invalid status filter: {status_filter}. "
+                        "Must be one of: NEEDS-ACTION, IN-PROCESS, COMPLETED, CANCELLED"
+                    ),
                     "error_code": "VALIDATION_ERROR",
                     "request_id": request_id,
                 }
@@ -302,7 +301,8 @@ async def update_task(
             percent_complete = int(percent_complete)
         except (ValueError, TypeError):
             raise ValidationError(
-                f"Invalid percent_complete value: {percent_complete}. Must be an integer between 0 and 100"
+                f"Invalid percent_complete value: {percent_complete}. "
+                "Must be an integer between 0 and 100"
             )
 
     # Validate and parse inputs
@@ -327,7 +327,8 @@ async def update_task(
             status_enum = TaskStatus(status)
         except ValueError:
             raise ValidationError(
-                f"Invalid status: {status}. Must be one of: NEEDS-ACTION, IN-PROCESS, COMPLETED, CANCELLED"
+                f"Invalid status: {status}. "
+                "Must be one of: NEEDS-ACTION, IN-PROCESS, COMPLETED, CANCELLED"
             )
 
     # Validate percent_complete

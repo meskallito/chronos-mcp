@@ -15,9 +15,7 @@ from chronos_mcp.search import search_events_ranked
 class TestSearchOptions:
     def test_search_options_defaults(self):
         """Test SearchOptions with default values"""
-        opts = SearchOptions(
-            query="meeting", fields=["summary", "description", "location"]
-        )
+        opts = SearchOptions(query="meeting", fields=["summary", "description", "location"])
 
         assert opts.query == "meeting"
         assert opts.fields == ["summary", "description", "location"]
@@ -179,8 +177,7 @@ class TestSearchEvents:
         opts = SearchOptions(
             query="",  # No text filter
             fields=["summary", "description", "location"],
-            date_start=base_date
-            - timedelta(seconds=1),  # Slightly before to include "today"
+            date_start=base_date - timedelta(seconds=1),  # Slightly before to include "today"
             date_end=base_date + timedelta(days=7),
         )
         results = search_events_func(events, opts)
@@ -247,9 +244,7 @@ class TestSearchEvents:
 class TestRelevanceScoring:
     def test_field_weight_scoring(self):
         """Test that different fields have different weights"""
-        opts = SearchOptions(
-            query="important", fields=["summary", "description", "location"]
-        )
+        opts = SearchOptions(query="important", fields=["summary", "description", "location"])
 
         # Event with match in summary (weight 3.0)
         event_summary = {
@@ -280,9 +275,7 @@ class TestRelevanceScoring:
 
     def test_position_scoring(self):
         """Test that earlier matches score higher"""
-        opts = SearchOptions(
-            query="meeting", fields=["summary", "description", "location"]
-        )
+        opts = SearchOptions(query="meeting", fields=["summary", "description", "location"])
 
         # Match at beginning
         event_start = {
@@ -305,9 +298,7 @@ class TestRelevanceScoring:
 
     def test_recency_scoring(self):
         """Test that recent events get a boost"""
-        opts = SearchOptions(
-            query="meeting", fields=["summary", "description", "location"]
-        )
+        opts = SearchOptions(query="meeting", fields=["summary", "description", "location"])
         current_time = datetime.now()
 
         # Event from today
@@ -353,9 +344,7 @@ class TestRelevanceScoring:
             },
         ]
 
-        opts = SearchOptions(
-            query="meeting", fields=["summary", "description", "location"]
-        )
+        opts = SearchOptions(query="meeting", fields=["summary", "description", "location"])
         ranked_results = search_events_ranked(events, opts)
 
         assert len(ranked_results) == 4

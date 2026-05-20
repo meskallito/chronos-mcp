@@ -2,17 +2,11 @@
 Calendar management tools for Chronos MCP
 """
 
-import uuid
 from typing import Any, Dict, Optional
 
 from pydantic import Field
 
-from ..exceptions import (
-    CalendarNotFoundError,
-    ChronosError,
-    ErrorSanitizer,
-    ValidationError,
-)
+from ..exceptions import ValidationError
 from ..logging_config import setup_logging
 from ..validation import InputValidator
 from .base import create_success_response, handle_tool_errors
@@ -64,19 +58,13 @@ async def create_calendar(
         if description:
             description = InputValidator.validate_text_field(description, "description")
         if color and not InputValidator.PATTERNS["color"].match(color):
-            raise ValidationError(
-                "Invalid color format. Must be hex color like #FF0000"
-            )
+            raise ValidationError("Invalid color format. Must be hex color like #FF0000")
         if account:
-            account = InputValidator.validate_text_field(
-                account, "alias", required=False
-            )
+            account = InputValidator.validate_text_field(account, "alias", required=False)
     except ValidationError as e:
         return {"success": False, "error": str(e)}
 
-    calendar = _managers["calendar_manager"].create_calendar(
-        name, description, color, account
-    )
+    calendar = _managers["calendar_manager"].create_calendar(name, description, color, account)
 
     if calendar:
         return {
@@ -105,9 +93,7 @@ async def delete_calendar(
     if account:
         account = InputValidator.validate_text_field(account, "alias", required=False)
 
-    _managers["calendar_manager"].delete_calendar(
-        calendar_uid, account, request_id=request_id
-    )
+    _managers["calendar_manager"].delete_calendar(calendar_uid, account, request_id=request_id)
 
     return create_success_response(
         message=f"Calendar '{calendar_uid}' deleted successfully",

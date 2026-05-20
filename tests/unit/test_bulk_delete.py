@@ -2,11 +2,9 @@
 Unit tests for bulk event deletion functionality
 """
 
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import pytest
-
-from chronos_mcp.exceptions import EventNotFoundError
 
 # Import the actual function directly
 from chronos_mcp.server import bulk_delete_events
@@ -59,9 +57,7 @@ class TestBulkDeleteEvents:
         mock_result = BulkResult(total=5, successful=5, failed=0)
         for i in range(5):
             mock_result.results.append(
-                OperationResult(
-                    index=i, success=True, uid=f"uid-{i+1}", duration_ms=0.1
-                )
+                OperationResult(index=i, success=True, uid=f"uid-{i+1}", duration_ms=0.1)
             )
 
         mock_managers["bulk"].bulk_delete_events.return_value = mock_result
@@ -264,9 +260,7 @@ class TestBulkDeleteEvents:
 
         mock_result = BulkResult(total=1, successful=0, failed=1)
         mock_result.results.append(
-            OperationResult(
-                index=0, success=False, error="Network error", duration_ms=0.1
-            )
+            OperationResult(index=0, success=False, error="Network error", duration_ms=0.1)
         )
         mock_managers["bulk"].bulk_delete_events.return_value = mock_result
 
@@ -319,9 +313,7 @@ class TestBulkDeleteEvents:
         mock_result = BulkResult(total=5, successful=5, failed=0)
         for i in range(5):
             mock_result.results.append(
-                OperationResult(
-                    index=i, success=True, uid=f"uid-{i+1}", duration_ms=0.1
-                )
+                OperationResult(index=i, success=True, uid=f"uid-{i+1}", duration_ms=0.1)
             )
         mock_managers["bulk"].bulk_delete_events.return_value = mock_result
 

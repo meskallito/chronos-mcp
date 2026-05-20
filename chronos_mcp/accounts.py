@@ -153,9 +153,7 @@ class AccountManager:
 
         # Get password from keyring or fallback to config
         credential_manager = get_credential_manager()
-        password = credential_manager.get_password(
-            alias, fallback_password=account.password
-        )
+        password = credential_manager.get_password(alias, fallback_password=account.password)
 
         if not password:
             raise AccountAuthenticationError(alias, request_id=request_id)
@@ -238,9 +236,7 @@ class AccountManager:
                     )
 
         # Should never reach here, but just in case
-        raise AccountConnectionError(
-            alias, original_error=last_exception, request_id=request_id
-        )
+        raise AccountConnectionError(alias, original_error=last_exception, request_id=request_id)
 
     def disconnect_account(self, alias: str):
         """Disconnect from an account and clean up resources
@@ -299,7 +295,8 @@ class AccountManager:
         for alias in stale_aliases:
             age_minutes = (current_time - self._connection_timestamps[alias]) / 60
             logger.debug(
-                f"Cleaning up stale connection for account '{alias}' (age: {age_minutes:.1f} minutes)"
+                f"Cleaning up stale connection for account '{alias}' "
+                f"(age: {age_minutes:.1f} minutes)"
             )
             self.disconnect_account(alias)
 
@@ -377,9 +374,7 @@ class AccountManager:
 
         return self.principals.get(alias)
 
-    def test_account(
-        self, alias: str, request_id: Optional[str] = None
-    ) -> Dict[str, Any]:
+    def test_account(self, alias: str, request_id: Optional[str] = None) -> Dict[str, Any]:
         """Test account connectivity and return structured result"""
         result = {"alias": alias, "connected": False, "calendars": 0, "error": None}
 
@@ -398,9 +393,7 @@ class AccountManager:
             logger.error(f"Test account failed: {e}", extra={"request_id": request_id})
         except Exception as e:
             # Unexpected error - wrap and sanitize
-            wrapped_error = AccountConnectionError(
-                alias, original_error=e, request_id=request_id
-            )
+            wrapped_error = AccountConnectionError(alias, original_error=e, request_id=request_id)
             result["error"] = ErrorSanitizer.get_user_friendly_message(wrapped_error)
             logger.error(
                 f"Test account failed with unexpected error: {wrapped_error}",

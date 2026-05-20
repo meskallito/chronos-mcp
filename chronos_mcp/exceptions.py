@@ -99,17 +99,13 @@ class AccountError(ChronosError):
 class AccountConnectionError(AccountError):
     """Raised when connection to CalDAV account fails"""
 
-    def __init__(
-        self, alias: str, original_error: Optional[Exception] = None, **kwargs
-    ):
+    def __init__(self, alias: str, original_error: Optional[Exception] = None, **kwargs):
         details = {"alias": alias}
         if original_error:
             details["original_error"] = str(original_error)
             details["original_type"] = type(original_error).__name__
 
-        super().__init__(
-            f"Failed to connect to account '{alias}'", details=details, **kwargs
-        )
+        super().__init__(f"Failed to connect to account '{alias}'", details=details, **kwargs)
 
 
 class AccountAuthenticationError(AccountError):
@@ -151,9 +147,7 @@ class CalendarNotFoundError(CalDAVError):
         if account:
             details["account"] = account
 
-        super().__init__(
-            f"Calendar '{calendar_uid}' not found", details=details, **kwargs
-        )
+        super().__init__(f"Calendar '{calendar_uid}' not found", details=details, **kwargs)
 
 
 class CalendarCreationError(CalDAVError):
@@ -164,9 +158,7 @@ class CalendarCreationError(CalDAVError):
         if reason:
             message += f": {reason}"
 
-        super().__init__(
-            message, details={"calendar_name": name, "reason": reason}, **kwargs
-        )
+        super().__init__(message, details={"calendar_name": name, "reason": reason}, **kwargs)
 
 
 class CalendarDeletionError(CalDAVError):
@@ -223,9 +215,7 @@ class EventCreationError(CalDAVError):
         if reason:
             message += f": {reason}"
 
-        super().__init__(
-            message, details={"event_summary": summary, "reason": reason}, **kwargs
-        )
+        super().__init__(message, details={"event_summary": summary, "reason": reason}, **kwargs)
 
 
 class EventDeletionError(CalDAVError):
@@ -236,9 +226,7 @@ class EventDeletionError(CalDAVError):
         if reason:
             message += f": {reason}"
 
-        super().__init__(
-            message, details={"event_uid": event_uid, "reason": reason}, **kwargs
-        )
+        super().__init__(message, details={"event_uid": event_uid, "reason": reason}, **kwargs)
 
 
 # Validation Errors
@@ -456,7 +444,9 @@ class ErrorSanitizer:
         # Map error codes to friendly messages
         friendly_messages = {
             "AUTH_FAILED": "Authentication failed. Please check your credentials.",
-            "INVALID_DATETIME": "Invalid date/time format. Please use ISO format (YYYY-MM-DD HH:MM:SS).",
+            "INVALID_DATETIME": (
+                "Invalid date/time format. Please use ISO format (YYYY-MM-DD HH:MM:SS)."
+            ),
             "INVALID_RRULE": "Invalid recurrence rule format.",
             "INVALID_ATTENDEE": "Invalid attendee information provided.",
             "ACCOUNT_EXISTS": "An account with this name already exists.",
@@ -465,7 +455,9 @@ class ErrorSanitizer:
             "EventNotFoundError": "The specified event was not found.",
             "TaskNotFoundError": "The specified task was not found.",
             "JournalNotFoundError": "The specified journal entry was not found.",
-            "AccountConnectionError": "Could not connect to the calendar server. Please check the server URL.",
+            "AccountConnectionError": (
+                "Could not connect to the calendar server. Please check the server URL."
+            ),
             "CalendarCreationError": "Could not create the calendar. It may already exist.",
             "EventCreationError": "Could not create the event. Please check all required fields.",
             "InvalidConfigError": "The configuration file is invalid or corrupted.",

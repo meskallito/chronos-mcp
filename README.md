@@ -11,13 +11,13 @@ A comprehensive Model Context Protocol (MCP) server for CalDAV calendar manageme
 
 - **Multi-account Support**: Manage multiple CalDAV servers simultaneously
 - **Full CRUD Operations**: Create, read, update, and delete calendars and events ✅
-- **Advanced Event Management**: 
+- **Advanced Event Management**:
   - Recurring events with RRULE support ✅
   - Event updates with partial field modifications ✅
   - Attendee management and invitations (JSON format) ✅
   - Reminders and alarms (VALARM) ✅
   - Timezone-aware operations
-- **Advanced Search**: 
+- **Advanced Search**:
   - Full-text search across events ✅
   - Field-specific search (title, description, location) ✅
   - Multiple match types (contains, starts_with, exact, regex) ✅
@@ -210,7 +210,7 @@ Create recurring event with attendees:
 chronos:create_event(
     calendar_uid="work",
     summary="Weekly Standup",
-    start="2025-07-07T09:00:00", 
+    start="2025-07-07T09:00:00",
     end="2025-07-07T09:30:00",
     recurrence_rule="FREQ=WEEKLY;BYDAY=MO,WE,FR",
     attendees_json='[{"email": "team@example.com", "name": "Team"}]'
@@ -241,7 +241,7 @@ chronos:update_event(
 - [Usage](#usage) - Basic tool usage examples
 - [Architecture Guide](docs/ARCHITECTURE.md) - System design and components
 - [RRULE Guide](docs/RRULE_GUIDE.md) - Recurring events documentation
-- [VTODO/VJOURNAL Guide](docs/VTODO_VJOURNAL_GUIDE.md) - Task and journal entry documentation
+- [VTODO/VJOURNAL Guide](docs/VTODO_VJOURNAL_GUIDE.md) - Task and journal management
 
 ## Known Issues
 

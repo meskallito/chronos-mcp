@@ -2,9 +2,8 @@
 Unit tests for input validation
 """
 
-from datetime import datetime
-import ipaddress
 import socket
+from datetime import datetime
 from unittest.mock import patch
 
 import pytest
@@ -696,9 +695,7 @@ class TestURLValidation:
         for blocked_url in blocked_urls:
             with pytest.raises(ValidationError) as exc_info:
                 InputValidator.validate_url(blocked_url)
-            assert "localhost and loopback addresses are not allowed" in str(
-                exc_info.value
-            )
+            assert "localhost and loopback addresses are not allowed" in str(exc_info.value)
 
     @patch("socket.getaddrinfo")
     def test_validate_url_ssrf_protection_private_ip_resolution(self, mock_dns):

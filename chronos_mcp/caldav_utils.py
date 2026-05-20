@@ -7,6 +7,7 @@ eliminating code duplication across events, tasks, and journals managers.
 
 import logging
 from typing import Any, Optional
+
 from icalendar import Calendar as iCalendar
 
 logger = logging.getLogger(__name__)
@@ -96,7 +97,10 @@ def get_item_with_fallback(
     try:
         # Get the list of items
         if hasattr(calendar, list_method):
-            items = getattr(calendar, list_method)()
+            if list_method == "todos":
+                items = getattr(calendar, list_method)(include_completed=True)
+            else:
+                items = getattr(calendar, list_method)()
         elif fallback_method and hasattr(calendar, fallback_method):
             # Use fallback method if primary not available (e.g., todos() not available)
             logger.debug(
@@ -105,16 +109,14 @@ def get_item_with_fallback(
             )
             items = getattr(calendar, fallback_method)()
         else:
-            raise ValueError(
-                f"Calendar does not support {list_method}() or {fallback_method}()"
-            )
+            raise ValueError(f"Calendar does not support {list_method}() or {fallback_method}()")
 
         # Search through items
         for item in items:
             # Check if UID matches in the raw data (fast check)
             # Handle both bytes (real CalDAV) and string (test mocks)
             if isinstance(item.data, bytes):
-                uid_to_check = uid.encode('utf-8')
+                uid_to_check = uid.encode("utf-8")
             else:
                 uid_to_check = uid
 

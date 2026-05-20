@@ -20,7 +20,7 @@ import re
 import socket
 import unicodedata
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 from urllib.parse import urlparse
 
 from .exceptions import ValidationError
@@ -67,7 +67,13 @@ class InputValidator:
         "uid": re.compile(r"^[a-zA-Z0-9\-_.@]+$"),
         "email": re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"),
         "url": re.compile(
-            r"^https://(?:[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*\.[a-zA-Z]{2,}|[a-zA-Z0-9-]+|localhost|(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?))(?::(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?(?:/[^\s]*)?$"
+            r"^https://(?:[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*\.[a-zA-Z]{2,}"
+            r"|[a-zA-Z0-9-]+|localhost"
+            r"|(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}"
+            r"(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?))"
+            r"(?::(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}"
+            r"|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?"
+            r"(?:/[^\s]*)?$"
         ),
         "color": re.compile(r"^#[0-9A-Fa-f]{6}$"),
     }
@@ -86,9 +92,7 @@ class InputValidator:
         # Event handlers (simplified, non-greedy)
         re.compile(r"\bon\w+\s*=", re.IGNORECASE),
         # Dangerous HTML elements (simplified)
-        re.compile(
-            r"<(?:iframe|frame|object|embed|applet|form|meta|link)\b", re.IGNORECASE
-        ),
+        re.compile(r"<(?:iframe|frame|object|embed|applet|form|meta|link)\b", re.IGNORECASE),
         # Expression and eval patterns (simplified)
         re.compile(r"\bexpression\s*\(", re.IGNORECASE),
         re.compile(r"\beval\s*\(", re.IGNORECASE),
@@ -129,9 +133,7 @@ class InputValidator:
             )
 
         if "location" in event_data:
-            sanitized["location"] = cls.validate_text_field(
-                event_data["location"], "location"
-            )
+            sanitized["location"] = cls.validate_text_field(event_data["location"], "location")
 
         sanitized["dtstart"] = cls.validate_datetime(event_data["dtstart"], "dtstart")
         sanitized["dtend"] = cls.validate_datetime(event_data["dtend"], "dtend")
@@ -146,9 +148,7 @@ class InputValidator:
             sanitized["attendees"] = cls.validate_attendees(event_data["attendees"])
 
         if "recurrence_rule" in event_data:
-            sanitized["recurrence_rule"] = cls.validate_rrule(
-                event_data["recurrence_rule"]
-            )
+            sanitized["recurrence_rule"] = cls.validate_rrule(event_data["recurrence_rule"])
 
         return sanitized
 
@@ -180,9 +180,7 @@ class InputValidator:
         return test_value
 
     @classmethod
-    def validate_text_field(
-        cls, value: str, field_name: str, required: bool = False
-    ) -> str:
+    def validate_text_field(cls, value: str, field_name: str, required: bool = False) -> str:
         """Validate and sanitize text fields."""
         if not value and required:
             raise ValidationError(f"{field_name} is required")
@@ -195,14 +193,13 @@ class InputValidator:
         # Pre-filter: Reject extremely long inputs before regex validation
         if len(value) > cls.MAX_VALIDATION_LENGTH:
             raise ValidationError(
-                f"{field_name} exceeds maximum validation length of {cls.MAX_VALIDATION_LENGTH} characters"
+                f"{field_name} exceeds maximum validation length of "
+                f"{cls.MAX_VALIDATION_LENGTH} characters"
             )
 
         max_length = cls.MAX_LENGTHS.get(field_name, 1000)
         if len(value) > max_length:
-            raise ValidationError(
-                f"{field_name} exceeds maximum length of {max_length} characters"
-            )
+            raise ValidationError(f"{field_name} exceeds maximum length of {max_length} characters")
 
         # Normalize Unicode
         value = unicodedata.normalize("NFKC", value)
@@ -213,15 +210,11 @@ class InputValidator:
         for test_val in test_values:
             # Additional length check after decoding
             if len(test_val) > cls.MAX_VALIDATION_LENGTH:
-                raise ValidationError(
-                    f"{field_name} contains excessively long decoded content"
-                )
+                raise ValidationError(f"{field_name} contains excessively long decoded content")
 
             for pattern in cls.DANGEROUS_PATTERNS:
                 if pattern.search(test_val):
-                    raise ValidationError(
-                        f"{field_name} contains potentially dangerous content"
-                    )
+                    raise ValidationError(f"{field_name} contains potentially dangerous content")
 
         # NOTE: HTML escaping removed - should happen at display layer, not storage
         # CalDAV expects unescaped data
@@ -250,9 +243,7 @@ class InputValidator:
             raise ValidationError("UID cannot be empty")
 
         if len(uid) > cls.MAX_LENGTHS["uid"]:
-            raise ValidationError(
-                f"UID exceeds maximum length of {cls.MAX_LENGTHS['uid']}"
-            )
+            raise ValidationError(f"UID exceeds maximum length of {cls.MAX_LENGTHS['uid']}")
 
         if not cls.PATTERNS["uid"].match(uid):
             raise ValidationError(
@@ -276,9 +267,7 @@ class InputValidator:
         return email
 
     @classmethod
-    def validate_attendees(
-        cls, attendees: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
+    def validate_attendees(cls, attendees: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Validate attendee list."""
         if not isinstance(attendees, list):
             raise ValidationError("Attendees must be a list")
@@ -310,9 +299,7 @@ class InputValidator:
                             "NON-PARTICIPANT",
                         ]
                         if attendee[field] not in valid_roles:
-                            raise ValidationError(
-                                f"Invalid attendee role: {attendee[field]}"
-                            )
+                            raise ValidationError(f"Invalid attendee role: {attendee[field]}")
                     validated_attendee[field] = attendee[field]
 
             validated.append(validated_attendee)
@@ -363,10 +350,7 @@ class InputValidator:
         if "status" in task_data and task_data["status"] is not None:
             sanitized["status"] = cls.validate_task_status(task_data["status"])
 
-        if (
-            "percent_complete" in task_data
-            and task_data["percent_complete"] is not None
-        ):
+        if "percent_complete" in task_data and task_data["percent_complete"] is not None:
             sanitized["percent_complete"] = cls.validate_percent_complete(
                 task_data["percent_complete"]
             )
@@ -397,22 +381,16 @@ class InputValidator:
             )
 
         if "dtstart" in journal_data and journal_data["dtstart"] is not None:
-            sanitized["dtstart"] = cls.validate_datetime(
-                journal_data["dtstart"], "dtstart"
-            )
+            sanitized["dtstart"] = cls.validate_datetime(journal_data["dtstart"], "dtstart")
 
         if "categories" in journal_data:
-            sanitized["categories"] = cls.validate_categories(
-                journal_data["categories"]
-            )
+            sanitized["categories"] = cls.validate_categories(journal_data["categories"])
 
         if "uid" in journal_data:
             sanitized["uid"] = cls.validate_uid(journal_data["uid"])
 
         if "related_to" in journal_data:
-            sanitized["related_to"] = cls.validate_related_to(
-                journal_data["related_to"]
-            )
+            sanitized["related_to"] = cls.validate_related_to(journal_data["related_to"])
 
         return sanitized
 
@@ -439,9 +417,7 @@ class InputValidator:
             return TaskStatus(str(status))
         except ValueError:
             valid_statuses = [s.value for s in TaskStatus]
-            raise ValidationError(
-                f"Invalid task status. Must be one of: {valid_statuses}"
-            )
+            raise ValidationError(f"Invalid task status. Must be one of: {valid_statuses}")
 
     @classmethod
     def validate_percent_complete(cls, percent: Any) -> int:
@@ -505,7 +481,8 @@ class InputValidator:
 
         Args:
             url: The URL to validate
-            allow_private_ips: If False (default), block localhost and private IPs for SSRF protection
+            allow_private_ips: If False (default), block localhost and
+                private IPs for SSRF protection
             field_name: Name of the field for error messages
 
         Returns:
@@ -521,8 +498,9 @@ class InputValidator:
 
         # Check URL length
         if len(url) > cls.MAX_LENGTHS.get("url", 2048):
+            max_url_len = cls.MAX_LENGTHS.get("url", 2048)
             raise ValidationError(
-                f"{field_name} exceeds maximum length of {cls.MAX_LENGTHS.get('url', 2048)} characters"
+                f"{field_name} exceeds maximum length of {max_url_len} characters"
             )
 
         # Check URL format using existing pattern
@@ -547,9 +525,7 @@ class InputValidator:
             hostname = parsed.hostname
 
             if not hostname:
-                raise ValidationError(
-                    f"Invalid URL format for {field_name}: no hostname found"
-                )
+                raise ValidationError(f"Invalid URL format for {field_name}: no hostname found")
 
             # Check against blocked hostnames (case-insensitive)
             if hostname.lower() in [h.lower() for h in cls.BLOCKED_HOSTNAMES]:
@@ -595,7 +571,7 @@ class InputValidator:
                         # Be conservative and reject
                         pass
 
-            except (socket.gaierror, socket.error) as e:
+            except (socket.gaierror, socket.error):
                 # If DNS resolution fails, we should be cautious
                 # Could be a non-existent domain or network issue
                 raise ValidationError(

@@ -20,9 +20,7 @@ class TestConfigManager:
         """Test adding an account"""
         mock_config_manager.add_account(sample_account)
         assert "test_account" in mock_config_manager.config.accounts
-        assert (
-            mock_config_manager.config.accounts["test_account"].username == "testuser"
-        )
+        assert mock_config_manager.config.accounts["test_account"].username == "testuser"
         # Should be set as default if it's the first account
         assert mock_config_manager.config.default_account == "test_account"
 
@@ -79,9 +77,7 @@ class TestConfigManager:
         assert len(accounts) == 1
         assert "test_account" in accounts
 
-    def test_add_duplicate_account_raises_error(
-        self, mock_config_manager, sample_account
-    ):
+    def test_add_duplicate_account_raises_error(self, mock_config_manager, sample_account):
         """Test that adding an account with duplicate alias raises AccountAlreadyExistsError"""
         from chronos_mcp.exceptions import AccountAlreadyExistsError
 

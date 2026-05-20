@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 from .exceptions import ErrorSanitizer
 from .logging_config import setup_logging
@@ -188,9 +188,7 @@ class BulkOperationManager:
 
                 # Track batch performance
                 for op_result in batch_results:
-                    self._track_operation_performance(
-                        "create_event", op_result.duration_ms
-                    )
+                    self._track_operation_performance("create_event", op_result.duration_ms)
 
                 for op_result in batch_results:
                     result.results.append(op_result)
@@ -209,16 +207,18 @@ class BulkOperationManager:
                             result.successful = 0
                             result.failed = len(events)
                             if failed_rollbacks:
+                                count = len(failed_rollbacks)
+                                ids = ", ".join(failed_rollbacks[:5])
+                                suffix = "..." if count > 5 else ""
                                 result.errors.append(
-                                    f"CRITICAL: Atomic rollback incomplete - {len(failed_rollbacks)} "
-                                    f"events could not be deleted: {', '.join(failed_rollbacks[:5])}"
-                                    + ("..." if len(failed_rollbacks) > 5 else "")
+                                    f"CRITICAL: Atomic rollback incomplete - "
+                                    f"{count} events could not be deleted: {ids}{suffix}"
                                 )
                             break
 
-                if (
-                    options.mode == BulkOperationMode.FAIL_FAST and result.failed > 0
-                ) or (options.mode == BulkOperationMode.ATOMIC and result.failed > 0):
+                if (options.mode == BulkOperationMode.FAIL_FAST and result.failed > 0) or (
+                    options.mode == BulkOperationMode.ATOMIC and result.failed > 0
+                ):
                     break
 
                 # Move to next batch
@@ -295,16 +295,18 @@ class BulkOperationManager:
                             result.successful = 0
                             result.failed = len(tasks)
                             if failed_rollbacks:
+                                count = len(failed_rollbacks)
+                                ids = ", ".join(failed_rollbacks[:5])
+                                suffix = "..." if count > 5 else ""
                                 result.errors.append(
-                                    f"CRITICAL: Atomic rollback incomplete - {len(failed_rollbacks)} "
-                                    f"tasks could not be deleted: {', '.join(failed_rollbacks[:5])}"
-                                    + ("..." if len(failed_rollbacks) > 5 else "")
+                                    f"CRITICAL: Atomic rollback incomplete - "
+                                    f"{count} tasks could not be deleted: {ids}{suffix}"
                                 )
                             break
 
-                if (
-                    options.mode == BulkOperationMode.FAIL_FAST and result.failed > 0
-                ) or (options.mode == BulkOperationMode.ATOMIC and result.failed > 0):
+                if (options.mode == BulkOperationMode.FAIL_FAST and result.failed > 0) or (
+                    options.mode == BulkOperationMode.ATOMIC and result.failed > 0
+                ):
                     break
 
         result.duration_ms = (time.time() - start_time) * 1000
@@ -378,16 +380,18 @@ class BulkOperationManager:
                             result.successful = 0
                             result.failed = len(journals)
                             if failed_rollbacks:
+                                count = len(failed_rollbacks)
+                                ids = ", ".join(failed_rollbacks[:5])
+                                suffix = "..." if count > 5 else ""
                                 result.errors.append(
-                                    f"CRITICAL: Atomic rollback incomplete - {len(failed_rollbacks)} "
-                                    f"journals could not be deleted: {', '.join(failed_rollbacks[:5])}"
-                                    + ("..." if len(failed_rollbacks) > 5 else "")
+                                    f"CRITICAL: Atomic rollback incomplete - "
+                                    f"{count} journals could not be deleted: {ids}{suffix}"
                                 )
                             break
 
-                if (
-                    options.mode == BulkOperationMode.FAIL_FAST and result.failed > 0
-                ) or (options.mode == BulkOperationMode.ATOMIC and result.failed > 0):
+                if (options.mode == BulkOperationMode.FAIL_FAST and result.failed > 0) or (
+                    options.mode == BulkOperationMode.ATOMIC and result.failed > 0
+                ):
                     break
 
         result.duration_ms = (time.time() - start_time) * 1000
@@ -406,12 +410,8 @@ class BulkOperationManager:
                 errors.append((idx, "Missing required field: dtend"))
 
             try:
-                start = datetime.fromisoformat(
-                    str(event.get("dtstart", "")).replace("Z", "+00:00")
-                )
-                end = datetime.fromisoformat(
-                    str(event.get("dtend", "")).replace("Z", "+00:00")
-                )
+                start = datetime.fromisoformat(str(event.get("dtstart", "")).replace("Z", "+00:00"))
+                end = datetime.fromisoformat(str(event.get("dtend", "")).replace("Z", "+00:00"))
                 if end < start:
                     errors.append((idx, "End time before start time"))
             except Exception:
@@ -444,9 +444,7 @@ class BulkOperationManager:
                     TaskStatus(status)
                 except ValueError:
                     valid_statuses = [s.value for s in TaskStatus]
-                    errors.append(
-                        (idx, f"Invalid status. Must be one of: {valid_statuses}")
-                    )
+                    errors.append((idx, f"Invalid status. Must be one of: {valid_statuses}"))
 
             # Validate percent_complete if provided
             percent = task.get("percent_complete")
@@ -469,9 +467,7 @@ class BulkOperationManager:
 
         return errors
 
-    def _validate_journals(
-        self, journals: List[Dict[str, Any]]
-    ) -> List[Tuple[int, str]]:
+    def _validate_journals(self, journals: List[Dict[str, Any]]) -> List[Tuple[int, str]]:
         """Validate journal data before execution."""
         errors = []
 
@@ -778,9 +774,7 @@ class BulkOperationManager:
         if options.dry_run:
             for idx in range(len(event_uids)):
                 result.results.append(
-                    OperationResult(
-                        index=idx, success=True, uid=event_uids[idx], duration_ms=0.1
-                    )
+                    OperationResult(index=idx, success=True, uid=event_uids[idx], duration_ms=0.1)
                 )
             result.successful = len(event_uids)
         else:
@@ -839,9 +833,7 @@ class BulkOperationManager:
         if options.dry_run:
             for idx in range(len(task_uids)):
                 result.results.append(
-                    OperationResult(
-                        index=idx, success=True, uid=task_uids[idx], duration_ms=0.1
-                    )
+                    OperationResult(index=idx, success=True, uid=task_uids[idx], duration_ms=0.1)
                 )
             result.successful = len(task_uids)
         else:
@@ -900,9 +892,7 @@ class BulkOperationManager:
         if options.dry_run:
             for idx in range(len(journal_uids)):
                 result.results.append(
-                    OperationResult(
-                        index=idx, success=True, uid=journal_uids[idx], duration_ms=0.1
-                    )
+                    OperationResult(index=idx, success=True, uid=journal_uids[idx], duration_ms=0.1)
                 )
             result.successful = len(journal_uids)
         else:

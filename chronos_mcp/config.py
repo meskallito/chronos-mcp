@@ -19,9 +19,7 @@ logger = setup_logging()
 class ChronosConfig(BaseModel):
     """Main configuration"""
 
-    accounts: Dict[str, Account] = Field(
-        default_factory=dict, description="Configured accounts"
-    )
+    accounts: Dict[str, Account] = Field(default_factory=dict, description="Configured accounts")
     default_account: Optional[str] = Field(None, description="Default account alias")
 
 
@@ -152,9 +150,7 @@ class ConfigManager:
                 if credential_manager.set_password(account.alias, account.password):
                     logger.info(f"Password for '{account.alias}' stored in keyring")
                 else:
-                    logger.warning(
-                        f"Failed to store password in keyring for '{account.alias}'"
-                    )
+                    logger.warning(f"Failed to store password in keyring for '{account.alias}'")
 
         self.config.accounts[account.alias] = account
         if not self.config.default_account:

@@ -54,8 +54,8 @@ except Exception as e:
 
 # Export all tools for backwards compatibility
 # This allows tests and existing code to import from server.py
-from .tools.accounts import add_account, list_accounts, remove_account, test_account
-from .tools.bulk import (
+from .tools.accounts import add_account, list_accounts, remove_account, test_account  # noqa: E402
+from .tools.bulk import (  # noqa: E402
     bulk_create_events,
     bulk_create_journals,
     bulk_create_tasks,
@@ -63,8 +63,8 @@ from .tools.bulk import (
     bulk_delete_journals,
     bulk_delete_tasks,
 )
-from .tools.calendars import create_calendar, delete_calendar, list_calendars
-from .tools.events import (
+from .tools.calendars import create_calendar, delete_calendar, list_calendars  # noqa: E402
+from .tools.events import (  # noqa: E402
     create_event,
     create_recurring_event,
     delete_event,
@@ -72,13 +72,13 @@ from .tools.events import (
     search_events,
     update_event,
 )
-from .tools.journals import (
+from .tools.journals import (  # noqa: E402
     create_journal,
     delete_journal,
     list_journals,
     update_journal,
 )
-from .tools.tasks import create_task, delete_task, list_tasks, update_task
+from .tools.tasks import create_task, delete_task, list_tasks, update_task  # noqa: E402
 
 __all__ = [
     # Account tools
@@ -116,6 +116,7 @@ __all__ = [
     "bulk_delete_journals",
 ]
 
+
 def main():
     """Main function to run the MCP server."""
     logger.info("Starting Chronos MCP Server...")
@@ -129,6 +130,7 @@ def main():
     except Exception as e:
         logger.error("Server error: %s", e, exc_info=True)
         raise
+
 
 # Main entry point for running the server
 if __name__ == "__main__":

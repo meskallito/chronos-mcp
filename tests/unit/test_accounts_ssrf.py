@@ -2,10 +2,10 @@
 Test SSRF protection in accounts module
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
 
-from chronos_mcp.exceptions import ValidationError
+import pytest
+
 from chronos_mcp.tools import accounts
 
 

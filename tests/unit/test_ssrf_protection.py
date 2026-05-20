@@ -6,7 +6,7 @@ requests to localhost, private IP ranges, and other potentially dangerous addres
 """
 
 import socket
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -116,9 +116,7 @@ class TestSSRFProtection:
             validator.validate_url("https://0.0.0.0/caldav")
 
     @patch("socket.getaddrinfo")
-    def test_validate_url_blocks_domains_resolving_to_private_ips(
-        self, mock_getaddrinfo
-    ):
+    def test_validate_url_blocks_domains_resolving_to_private_ips(self, mock_getaddrinfo):
         """Test that domains resolving to private IPs are blocked"""
         validator = InputValidator()
 
@@ -250,8 +248,7 @@ class TestSSRFProtection:
 
             error_msg = str(exc_info.value)
             assert (
-                "Invalid URL format" in error_msg
-                or "Must be a valid HTTPS URL" in error_msg
+                "Invalid URL format" in error_msg or "Must be a valid HTTPS URL" in error_msg
             ), f"Non-HTTPS protocol should be rejected: {url}"
 
     def test_validate_url_length_limits(self):
@@ -303,18 +300,14 @@ class TestSSRFProtection:
         ]
 
         for ip in invalid_ips:
-            assert validator.is_private_ip(
-                ip
-            ), f"Should treat invalid IP {ip} as suspicious"
+            assert validator.is_private_ip(ip), f"Should treat invalid IP {ip} as suspicious"
 
     def test_validate_url_field_name_in_errors(self):
         """Test that custom field names appear in error messages"""
         validator = InputValidator()
 
         with pytest.raises(ValidationError) as exc_info:
-            validator.validate_url(
-                "https://127.0.0.1/caldav", field_name="caldav_server"
-            )
+            validator.validate_url("https://127.0.0.1/caldav", field_name="caldav_server")
 
         error_msg = str(exc_info.value)
         assert "caldav_server" in error_msg, "Custom field name should appear in error"
@@ -334,9 +327,7 @@ class TestSSRFProtection:
         validator = InputValidator()
 
         # Leading/trailing whitespace should be stripped
-        result = validator.validate_url(
-            "  https://example.com/caldav  ", allow_private_ips=True
-        )
+        result = validator.validate_url("  https://example.com/caldav  ", allow_private_ips=True)
         assert result == "https://example.com/caldav"
 
         # Whitespace in URL should fail validation
@@ -406,9 +397,7 @@ class TestBackwardCompatibility:
             validator.validate_url("https://192.168.1.1/caldav")
 
         # But can be disabled for backward compatibility
-        result = validator.validate_url(
-            "https://192.168.1.1/caldav", allow_private_ips=True
-        )
+        result = validator.validate_url("https://192.168.1.1/caldav", allow_private_ips=True)
         assert result == "https://192.168.1.1/caldav"
 
     def test_validate_url_optional_parameters(self):
@@ -470,9 +459,7 @@ class TestRealWorldScenarios:
         ]
 
         for url, ip, description in attack_vectors:
-            mock_getaddrinfo.return_value = [
-                (socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 443))
-            ]
+            mock_getaddrinfo.return_value = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 443))]
 
             with pytest.raises(ValidationError) as exc_info:
                 validator.validate_url(url)

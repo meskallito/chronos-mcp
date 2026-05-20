@@ -3,27 +3,25 @@ Comprehensive unit tests for chronos_mcp/tools/tasks.py module
 Tests all MCP tool functions for 100% coverage with defensive programming patterns
 """
 
-import uuid
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, Mock, patch, AsyncMock
-from typing import Dict, Any
+from unittest.mock import Mock, patch
+
 import pytest
 
-from chronos_mcp.tools.tasks import (
-    create_task,
-    list_tasks,
-    update_task,
-    delete_task,
-    register_task_tools,
-    _managers,
-)
-from chronos_mcp.models import TaskStatus
 from chronos_mcp.exceptions import (
     CalendarNotFoundError,
-    EventNotFoundError,
+    ChronosError,
     EventCreationError,
     ValidationError,
-    ChronosError,
+)
+from chronos_mcp.models import TaskStatus
+from chronos_mcp.tools.tasks import (
+    _managers,
+    create_task,
+    delete_task,
+    list_tasks,
+    register_task_tools,
+    update_task,
 )
 
 
@@ -105,9 +103,7 @@ class TestTaskToolsComprehensive:
         _managers["task_manager"].create_task.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_create_task_priority_string_conversion(
-        self, setup_managers, sample_task
-    ):
+    async def test_create_task_priority_string_conversion(self, setup_managers, sample_task):
         """Test create_task converts string priority to int"""
         _managers["task_manager"].create_task.return_value = sample_task
 
@@ -164,9 +160,7 @@ class TestTaskToolsComprehensive:
     @pytest.mark.asyncio
     async def test_create_task_summary_validation_error(self, setup_managers):
         """Test create_task validation error for summary"""
-        with patch(
-            "chronos_mcp.tools.tasks.InputValidator.validate_text_field"
-        ) as mock_validate:
+        with patch("chronos_mcp.tools.tasks.InputValidator.validate_text_field") as mock_validate:
             mock_validate.side_effect = ValidationError("Summary too long")
 
             result = await create_task.fn(
@@ -187,9 +181,7 @@ class TestTaskToolsComprehensive:
     @pytest.mark.asyncio
     async def test_create_task_description_validation_error(self, setup_managers):
         """Test create_task validation error for description"""
-        with patch(
-            "chronos_mcp.tools.tasks.InputValidator.validate_text_field"
-        ) as mock_validate:
+        with patch("chronos_mcp.tools.tasks.InputValidator.validate_text_field") as mock_validate:
             # Summary passes, description fails
             mock_validate.side_effect = [
                 "Valid Summary",  # First call for summary
@@ -330,9 +322,7 @@ class TestTaskToolsComprehensive:
     @pytest.mark.asyncio
     async def test_create_task_unexpected_exception(self, setup_managers):
         """Test create_task handles unexpected exceptions"""
-        _managers["task_manager"].create_task.side_effect = RuntimeError(
-            "Unexpected error"
-        )
+        _managers["task_manager"].create_task.side_effect = RuntimeError("Unexpected error")
 
         result = await create_task.fn(
             calendar_uid="cal-123",
@@ -356,9 +346,7 @@ class TestTaskToolsComprehensive:
         """Test list_tasks successful execution"""
         _managers["task_manager"].list_tasks.return_value = [sample_task]
 
-        result = await list_tasks.fn(
-            calendar_uid="cal-123", status_filter=None, account=None
-        )
+        result = await list_tasks.fn(calendar_uid="cal-123", status_filter=None, account=None)
 
         assert len(result["tasks"]) == 1
         assert result["total"] == 1
@@ -407,9 +395,7 @@ class TestTaskToolsComprehensive:
 
         _managers["task_manager"].list_tasks.return_value = [task]
 
-        result = await list_tasks.fn(
-            calendar_uid="cal-123", status_filter=None, account=None
-        )
+        result = await list_tasks.fn(calendar_uid="cal-123", status_filter=None, account=None)
 
         assert result["tasks"][0]["due"] is None
 
@@ -419,9 +405,7 @@ class TestTaskToolsComprehensive:
         error = CalendarNotFoundError("Calendar not found")
         _managers["task_manager"].list_tasks.side_effect = error
 
-        result = await list_tasks.fn(
-            calendar_uid="cal-123", status_filter=None, account=None
-        )
+        result = await list_tasks.fn(calendar_uid="cal-123", status_filter=None, account=None)
 
         assert result["tasks"] == []
         assert result["total"] == 0
@@ -434,9 +418,7 @@ class TestTaskToolsComprehensive:
         error = ChronosError("General error")
         _managers["task_manager"].list_tasks.side_effect = error
 
-        result = await list_tasks.fn(
-            calendar_uid="cal-123", status_filter=None, account=None
-        )
+        result = await list_tasks.fn(calendar_uid="cal-123", status_filter=None, account=None)
 
         assert result["tasks"] == []
         assert result["total"] == 0
@@ -445,13 +427,9 @@ class TestTaskToolsComprehensive:
     @pytest.mark.asyncio
     async def test_list_tasks_unexpected_exception(self, setup_managers):
         """Test list_tasks handles unexpected exceptions"""
-        _managers["task_manager"].list_tasks.side_effect = RuntimeError(
-            "Unexpected error"
-        )
+        _managers["task_manager"].list_tasks.side_effect = RuntimeError("Unexpected error")
 
-        result = await list_tasks.fn(
-            calendar_uid="cal-123", status_filter=None, account=None
-        )
+        result = await list_tasks.fn(calendar_uid="cal-123", status_filter=None, account=None)
 
         assert result["tasks"] == []
         assert result["total"] == 0
@@ -482,9 +460,7 @@ class TestTaskToolsComprehensive:
         assert "request_id" in result
 
     @pytest.mark.asyncio
-    async def test_update_task_priority_string_conversion(
-        self, setup_managers, sample_task
-    ):
+    async def test_update_task_priority_string_conversion(self, setup_managers, sample_task):
         """Test update_task converts string priority to int"""
         _managers["task_manager"].update_task.return_value = sample_task
 
@@ -802,9 +778,7 @@ class TestTaskToolsComprehensive:
     @pytest.mark.asyncio
     async def test_create_task_empty_summary(self, setup_managers):
         """Test create_task with empty summary"""
-        with patch(
-            "chronos_mcp.tools.tasks.InputValidator.validate_text_field"
-        ) as mock_validate:
+        with patch("chronos_mcp.tools.tasks.InputValidator.validate_text_field") as mock_validate:
             mock_validate.side_effect = ValidationError("Summary is required")
 
             result = await create_task.fn(
@@ -860,9 +834,7 @@ class TestTaskToolsComprehensive:
     @pytest.mark.asyncio
     async def test_update_task_summary_validation_error(self, setup_managers):
         """Test update_task validation error for summary"""
-        with patch(
-            "chronos_mcp.tools.tasks.InputValidator.validate_text_field"
-        ) as mock_validate:
+        with patch("chronos_mcp.tools.tasks.InputValidator.validate_text_field") as mock_validate:
             mock_validate.side_effect = ValidationError("Summary invalid")
 
             result = await update_task.fn(
@@ -884,9 +856,7 @@ class TestTaskToolsComprehensive:
     @pytest.mark.asyncio
     async def test_update_task_description_validation_error(self, setup_managers):
         """Test update_task validation error for description"""
-        with patch(
-            "chronos_mcp.tools.tasks.InputValidator.validate_text_field"
-        ) as mock_validate:
+        with patch("chronos_mcp.tools.tasks.InputValidator.validate_text_field") as mock_validate:
             mock_validate.side_effect = ValidationError("Description invalid")
 
             result = await update_task.fn(

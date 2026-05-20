@@ -5,7 +5,6 @@ Tests for concurrency and race conditions
 import threading
 import time
 from unittest.mock import Mock, patch
-import pytest
 
 from chronos_mcp.accounts import AccountManager
 
@@ -34,6 +33,7 @@ class TestRaceConditions:
 
         # Mock connection
         call_count = [0]
+
         def create_mock_client(*args, **kwargs):
             call_count[0] += 1
             mock_client = Mock()
@@ -81,7 +81,9 @@ class TestRaceConditions:
         # With race condition: multiple disconnects could happen
         # Proper fix: staleness check inside lock prevents this
         # This test documents the issue even if hard to trigger reliably
-        assert len(disconnect_times) <= 1, f"Disconnect called {len(disconnect_times)} times - race detected"
+        assert (
+            len(disconnect_times) <= 1
+        ), f"Disconnect called {len(disconnect_times)} times - race detected"
 
     @patch("chronos_mcp.accounts.DAVClient")
     def test_connection_staleness_check_under_lock(
@@ -100,10 +102,14 @@ class TestRaceConditions:
         mgr.connect_account("test_account")
 
         # Make connection just barely not stale
-        mgr._connection_timestamps["test_account"] = time.time() - (mgr._connection_ttl_minutes * 60 - 1)
+        mgr._connection_timestamps["test_account"] = time.time() - (
+            mgr._connection_ttl_minutes * 60 - 1
+        )
 
         # Concurrent access shouldn't cause issues
-        threads = [threading.Thread(target=lambda: mgr.get_connection("test_account")) for _ in range(5)]
+        threads = [
+            threading.Thread(target=lambda: mgr.get_connection("test_account")) for _ in range(5)
+        ]
         for t in threads:
             t.start()
         for t in threads:
@@ -159,7 +165,9 @@ class TestRaceConditions:
             t.join()
 
         # Should only disconnect once during reconnect
-        assert len(disconnect_times) <= 1, f"Disconnect called {len(disconnect_times)} times - race detected"
+        assert (
+            len(disconnect_times) <= 1
+        ), f"Disconnect called {len(disconnect_times)} times - race detected"
 
     @patch("chronos_mcp.accounts.DAVClient")
     def test_mixed_connection_principal_access(

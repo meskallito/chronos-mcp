@@ -52,13 +52,9 @@ class JournalManager:
         """Create a new journal entry - raises exceptions on failure"""
         request_id = request_id or str(uuid.uuid4())
 
-        calendar = self.calendars.get_calendar(
-            calendar_uid, account_alias, request_id=request_id
-        )
+        calendar = self.calendars.get_calendar(calendar_uid, account_alias, request_id=request_id)
         if not calendar:
-            raise CalendarNotFoundError(
-                calendar_uid, account_alias, request_id=request_id
-            )
+            raise CalendarNotFoundError(calendar_uid, account_alias, request_id=request_id)
 
         try:
             # Use current time if dtstart not provided
@@ -94,19 +90,19 @@ class JournalManager:
                     extra={"request_id": request_id},
                 )
                 try:
-                    caldav_journal = calendar.save_journal(ical_data)
+                    calendar.save_journal(ical_data)
                 except Exception as e:
                     logger.warning(
                         f"calendar.save_journal() failed: {e}, falling back to save_event()",
                         extra={"request_id": request_id},
                     )
-                    caldav_journal = calendar.save_event(ical_data)
+                    calendar.save_event(ical_data)
             else:
                 logger.debug(
                     "Server doesn't support calendar.save_journal(), using calendar.save_event()",
                     extra={"request_id": request_id},
                 )
-                caldav_journal = calendar.save_event(ical_data)
+                calendar.save_event(ical_data)
 
             journal_model = Journal(
                 uid=journal_uid,
@@ -125,9 +121,7 @@ class JournalManager:
                 f"Authorization error creating journal '{summary}': {e}",
                 extra={"request_id": request_id},
             )
-            raise EventCreationError(
-                summary, "Authorization failed", request_id=request_id
-            )
+            raise EventCreationError(summary, "Authorization failed", request_id=request_id)
         except Exception as e:
             logger.error(
                 f"Error creating journal '{summary}': {e}",
@@ -145,13 +139,9 @@ class JournalManager:
         """Get a specific journal by UID"""
         request_id = request_id or str(uuid.uuid4())
 
-        calendar = self.calendars.get_calendar(
-            calendar_uid, account_alias, request_id=request_id
-        )
+        calendar = self.calendars.get_calendar(calendar_uid, account_alias, request_id=request_id)
         if not calendar:
-            raise CalendarNotFoundError(
-                calendar_uid, account_alias, request_id=request_id
-            )
+            raise CalendarNotFoundError(calendar_uid, account_alias, request_id=request_id)
 
         try:
             # Use utility function to find journal with automatic fallback
@@ -170,9 +160,7 @@ class JournalManager:
                 f"Error getting journal '{journal_uid}': {e}",
                 extra={"request_id": request_id},
             )
-            raise ChronosError(
-                f"Failed to get journal: {str(e)}", request_id=request_id
-            )
+            raise ChronosError(f"Failed to get journal: {str(e)}", request_id=request_id)
 
     def list_journals(
         self,
@@ -184,13 +172,9 @@ class JournalManager:
         """List all journals in a calendar"""
         request_id = request_id or str(uuid.uuid4())
 
-        calendar = self.calendars.get_calendar(
-            calendar_uid, account_alias, request_id=request_id
-        )
+        calendar = self.calendars.get_calendar(calendar_uid, account_alias, request_id=request_id)
         if not calendar:
-            raise CalendarNotFoundError(
-                calendar_uid, account_alias, request_id=request_id
-            )
+            raise CalendarNotFoundError(calendar_uid, account_alias, request_id=request_id)
 
         journals = []
         try:
@@ -220,7 +204,8 @@ class JournalManager:
             else:
                 # Fallback method for servers without journals() support
                 logger.debug(
-                    "Server doesn't support calendar.journals(), using calendar.events() with client-side filtering",
+                    "Server doesn't support calendar.journals(), "
+                    "using calendar.events() with client-side filtering",
                     extra={"request_id": request_id},
                 )
                 events = calendar.events()
@@ -254,9 +239,7 @@ class JournalManager:
                         extra={"request_id": request_id},
                     )
             else:
-                logger.error(
-                    f"Error listing journals: {e}", extra={"request_id": request_id}
-                )
+                logger.error(f"Error listing journals: {e}", extra={"request_id": request_id})
 
         # Apply limit if specified
         if limit and len(journals) > limit:
@@ -278,13 +261,9 @@ class JournalManager:
         """Update an existing journal - raises exceptions on failure"""
         request_id = request_id or str(uuid.uuid4())
 
-        calendar = self.calendars.get_calendar(
-            calendar_uid, account_alias, request_id=request_id
-        )
+        calendar = self.calendars.get_calendar(calendar_uid, account_alias, request_id=request_id)
         if not calendar:
-            raise CalendarNotFoundError(
-                calendar_uid, account_alias, request_id=request_id
-            )
+            raise CalendarNotFoundError(calendar_uid, account_alias, request_id=request_id)
 
         try:
             # Use utility function to find journal with automatic fallback
@@ -347,9 +326,7 @@ class JournalManager:
             caldav_journal.save()
 
             # Parse and return the updated journal
-            return self._parse_caldav_journal(
-                caldav_journal, calendar_uid, account_alias
-            )
+            return self._parse_caldav_journal(caldav_journal, calendar_uid, account_alias)
 
         except JournalNotFoundError:
             raise
@@ -376,13 +353,9 @@ class JournalManager:
         """Delete a journal by UID - raises exceptions on failure"""
         request_id = request_id or str(uuid.uuid4())
 
-        calendar = self.calendars.get_calendar(
-            calendar_uid, account_alias, request_id=request_id
-        )
+        calendar = self.calendars.get_calendar(calendar_uid, account_alias, request_id=request_id)
         if not calendar:
-            raise CalendarNotFoundError(
-                calendar_uid, account_alias, request_id=request_id
-            )
+            raise CalendarNotFoundError(calendar_uid, account_alias, request_id=request_id)
 
         try:
             # Use utility function to find journal with automatic fallback
@@ -406,9 +379,7 @@ class JournalManager:
                 f"Authorization error deleting journal '{journal_uid}': {e}",
                 extra={"request_id": request_id},
             )
-            raise EventDeletionError(
-                journal_uid, "Authorization failed", request_id=request_id
-            )
+            raise EventDeletionError(journal_uid, "Authorization failed", request_id=request_id)
         except Exception as e:
             logger.error(
                 f"Error deleting journal '{journal_uid}': {e}",
@@ -464,9 +435,7 @@ class JournalManager:
                         categories=categories,
                         related_to=related_to,
                         calendar_uid=calendar_uid,
-                        account_alias=account_alias
-                        or self._get_default_account()
-                        or "default",
+                        account_alias=account_alias or self._get_default_account() or "default",
                     )
 
                     return journal

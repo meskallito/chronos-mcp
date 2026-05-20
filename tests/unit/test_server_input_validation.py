@@ -29,16 +29,12 @@ class TestServerInputValidation:
         validator = InputValidator()
 
         # Valid text should pass
-        result = validator.validate_text_field(
-            "Valid Account Name", "alias", required=True
-        )
+        result = validator.validate_text_field("Valid Account Name", "alias", required=True)
         assert result == "Valid Account Name"
 
         # Dangerous script content should be rejected
         with pytest.raises(ValidationError) as exc_info:
-            validator.validate_text_field(
-                "<script>alert('xss')</script>", "alias", required=True
-            )
+            validator.validate_text_field("<script>alert('xss')</script>", "alias", required=True)
         assert "dangerous content" in str(exc_info.value)
 
         # JavaScript protocol should be rejected
@@ -104,9 +100,7 @@ class TestServerInputValidation:
         # Valid hex colors should pass
         valid_colors = ["#FF0000", "#00FF00", "#0000FF", "#123456", "#ABCDEF"]
         for color in valid_colors:
-            assert validator.PATTERNS["color"].match(
-                color
-            ), f"Valid color should match: {color}"
+            assert validator.PATTERNS["color"].match(color), f"Valid color should match: {color}"
 
         # Invalid colors should be rejected
         invalid_colors = ["FF0000", "#GG0000", "#12345", "#1234567", "red"]
@@ -123,9 +117,7 @@ class TestServerInputValidation:
 
         # Unicode text should be normalized
         unicode_text = "Tést Àccount with ünicode"
-        result = validator.validate_text_field(
-            unicode_text, "display_name", required=True
-        )
+        result = validator.validate_text_field(unicode_text, "display_name", required=True)
 
         # Should not raise an error and should normalize the text
         assert result is not None
@@ -145,15 +137,11 @@ class TestServerInputValidation:
 
         for dangerous_input in dangerous_inputs:
             with pytest.raises(ValidationError) as exc_info:
-                validator.validate_text_field(
-                    dangerous_input, "description", required=False
-                )
-            assert "dangerous content" in str(
-                exc_info.value
-            ), f"Should reject: {dangerous_input}"
+                validator.validate_text_field(dangerous_input, "description", required=False)
+            assert "dangerous content" in str(exc_info.value), f"Should reject: {dangerous_input}"
 
         # Some patterns might not match exactly - that's OK as long as major threats are caught
-        potentially_dangerous = [
+        potentially_dangerous = [  # noqa: F841
             "on<event>=handler",  # Might not match our specific patterns
             "\\u003cscript\\u003ealert(1)\\u003c/script\\u003e",  # Unicode escapes
         ]
@@ -175,9 +163,7 @@ class TestServerInputValidation:
         ]
 
         for safe_input in safe_inputs:
-            result = validator.validate_text_field(
-                safe_input, "description", required=False
-            )
+            result = validator.validate_text_field(safe_input, "description", required=False)
             assert result is not None, f"Should preserve safe content: {safe_input}"
             assert len(result) > 0
 
@@ -206,9 +192,7 @@ class TestServerInputValidation:
 
         # Test with potentially sensitive information
         try:
-            validator.validate_text_field(
-                "password123secret<script>", "alias", required=True
-            )
+            validator.validate_text_field("password123secret<script>", "alias", required=True)
             assert False, "Should have raised ValidationError"
         except ValidationError as e:
             error_msg = str(e)

@@ -38,9 +38,7 @@ class TestAccountManager:
         assert exc_info.value.details["alias"] == "nonexistent"
 
     @patch("chronos_mcp.accounts.DAVClient")
-    def test_connect_account_success(
-        self, mock_dav_client, mock_config_manager, sample_account
-    ):
+    def test_connect_account_success(self, mock_dav_client, mock_config_manager, sample_account):
         """Test successful connection to an account"""
         # Add account to config manager first
         mock_config_manager.add_account(sample_account)
@@ -59,9 +57,7 @@ class TestAccountManager:
         assert sample_account.status == AccountStatus.CONNECTED
 
     @patch("chronos_mcp.accounts.DAVClient")
-    def test_connect_account_failure(
-        self, mock_dav_client, mock_config_manager, sample_account
-    ):
+    def test_connect_account_failure(self, mock_dav_client, mock_config_manager, sample_account):
         """Test connection failure"""
         # Add account to config manager first
         mock_config_manager.add_account(sample_account)
@@ -188,9 +184,7 @@ class TestAccountManager:
             with pytest.raises(AccountConnectionError) as exc_info:
                 mgr.connect_account("test_account")
             # Check that the error details contain the circuit breaker message
-            assert "Circuit breaker is OPEN" in exc_info.value.details.get(
-                "original_error", ""
-            )
+            assert "Circuit breaker is OPEN" in exc_info.value.details.get("original_error", "")
 
     def test_connection_health_tracking(self, mock_config_manager, sample_account):
         """Test connection health metrics are tracked"""
@@ -231,9 +225,7 @@ class TestAccountManager:
             mock_client.principal.return_value = Mock()
             return mock_client
 
-        with patch(
-            "chronos_mcp.accounts.DAVClient", side_effect=mock_dav_client_side_effect
-        ):
+        with patch("chronos_mcp.accounts.DAVClient", side_effect=mock_dav_client_side_effect):
             with patch("time.sleep") as mock_sleep:  # Mock sleep for testing
                 result = mgr.connect_account("test_account")
 
@@ -241,9 +233,7 @@ class TestAccountManager:
                 assert call_count == 3  # Should have retried
                 assert mock_sleep.call_count == 2  # 2 sleeps before success
 
-    def test_connection_timeout_configuration(
-        self, mock_config_manager, sample_account
-    ):
+    def test_connection_timeout_configuration(self, mock_config_manager, sample_account):
         """Test connection timeout is properly configured"""
         mock_config_manager.add_account(sample_account)
         mgr = AccountManager(mock_config_manager)
@@ -266,8 +256,8 @@ class TestAccountManager:
 
     def test_password_validation_in_add_account(self):
         """Test that password is validated when adding an account"""
-        from chronos_mcp.validation import InputValidator
         from chronos_mcp.exceptions import ValidationError
+        from chronos_mcp.validation import InputValidator
 
         # Test with control characters in password - should be rejected
         with pytest.raises(ValidationError) as exc_info:
@@ -287,6 +277,7 @@ class TestAccountManager:
     def test_add_account_validates_password(self, mock_managers_dict, mock_config_manager):
         """Test that add_account tool validates password input"""
         import asyncio
+
         from chronos_mcp.tools.accounts import add_account
 
         # Setup managers
@@ -296,7 +287,7 @@ class TestAccountManager:
             "alias": "test",
             "connected": True,
             "calendars": 2,
-            "error": None
+            "error": None,
         }
 
         def manager_getter(key):
@@ -310,13 +301,15 @@ class TestAccountManager:
 
         # Test with invalid password (control character)
         # The decorator catches exceptions and returns error dict
-        result = asyncio.run(add_account(
-            alias="test",
-            url="https://example.com",
-            username="user",
-            password="pass\x00word",  # Null byte
-            allow_local=True
-        ))
+        result = asyncio.run(
+            add_account(
+                alias="test",
+                url="https://example.com",
+                username="user",
+                password="pass\x00word",  # Null byte
+                allow_local=True,
+            )
+        )
 
         # Should return error response
         assert result["success"] is False
@@ -353,9 +346,7 @@ class TestAccountManager:
         assert breaker.state == CircuitBreakerState.CLOSED
 
     @patch("chronos_mcp.accounts.DAVClient")
-    def test_cleanup_stale_connection(
-        self, mock_dav_client, mock_config_manager, sample_account
-    ):
+    def test_cleanup_stale_connection(self, mock_dav_client, mock_config_manager, sample_account):
         """Test cleanup of stale connections"""
         mock_config_manager.add_account(sample_account)
         mgr = AccountManager(mock_config_manager)
