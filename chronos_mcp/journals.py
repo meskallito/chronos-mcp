@@ -6,10 +6,10 @@ import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
 
-import caldav
+import caldav  # type: ignore[import-untyped,import-not-found]
 from caldav import Event as CalDAVEvent
-from icalendar import Calendar as iCalendar
-from icalendar import Journal as iJournal
+from icalendar import Calendar as iCalendar  # type: ignore[import-untyped]
+from icalendar import Journal as iJournal  # type: ignore[import-untyped]
 
 from .caldav_utils import get_item_with_fallback
 from .calendars import CalendarManager

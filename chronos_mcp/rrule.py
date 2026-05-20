@@ -8,7 +8,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from dateutil.rrule import DAILY, MONTHLY, WEEKLY, YEARLY, rrulestr
+from dateutil.rrule import DAILY, MONTHLY, WEEKLY, YEARLY, rrulestr  # type: ignore[import-untyped]
 
 logger = logging.getLogger(__name__)
 
@@ -204,7 +204,7 @@ class RRuleValidator:
         Returns:
             Dictionary with RRULE components
         """
-        info = {
+        info: Dict[str, Any] = {
             "frequency": None,
             "interval": 1,
             "count": None,

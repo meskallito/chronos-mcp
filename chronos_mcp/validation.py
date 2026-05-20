@@ -114,7 +114,7 @@ class InputValidator:
     @classmethod
     def validate_event(cls, event_data: Dict[str, Any]) -> Dict[str, Any]:
         """Validate and sanitize event data."""
-        sanitized = {}
+        sanitized: Dict[str, Any] = {}
 
         if not event_data.get("summary"):
             raise ValidationError("Event summary is required")
@@ -327,7 +327,7 @@ class InputValidator:
     @classmethod
     def validate_task(cls, task_data: Dict[str, Any]) -> Dict[str, Any]:
         """Validate and sanitize task data."""
-        sanitized = {}
+        sanitized: Dict[str, Any] = {}
 
         if not task_data.get("summary"):
             raise ValidationError("Task summary is required")
@@ -366,7 +366,7 @@ class InputValidator:
     @classmethod
     def validate_journal(cls, journal_data: Dict[str, Any]) -> Dict[str, Any]:
         """Validate and sanitize journal data."""
-        sanitized = {}
+        sanitized: Dict[str, Any] = {}
 
         if not journal_data.get("summary"):
             raise ValidationError("Journal summary is required")

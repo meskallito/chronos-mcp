@@ -6,10 +6,10 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-import caldav
+import caldav  # type: ignore[import-untyped,import-not-found]
 from caldav import Event as CalDAVEvent
-from icalendar import Calendar as iCalendar
-from icalendar import Event as iEvent
+from icalendar import Calendar as iCalendar  # type: ignore[import-untyped]
+from icalendar import Event as iEvent  # type: ignore[import-untyped]
 
 from .caldav_utils import get_item_with_fallback
 from .calendars import CalendarManager
@@ -20,7 +20,7 @@ from .exceptions import (
     EventNotFoundError,
 )
 from .logging_config import setup_logging
-from .models import Alarm, Attendee, Event
+from .models import Alarm, Attendee, Event, EventStatus
 from .utils import ical_to_datetime, validate_rrule
 
 logger = setup_logging()
@@ -137,6 +137,9 @@ class EventManager:
                 end=end,
                 all_day=all_day,
                 location=location,
+                status=EventStatus.CONFIRMED,
+                recurrence_id=None,
+                url=None,
                 calendar_uid=calendar_uid,
                 account_alias=account_alias or self._get_default_account() or "default",
                 recurrence_rule=recurrence_rule,
@@ -264,6 +267,9 @@ class EventManager:
                             if component.get("location")
                             else None
                         ),
+                        status=EventStatus.CONFIRMED,
+                        recurrence_id=None,
+                        url=None,
                         calendar_uid=calendar_uid,
                         account_alias=account_alias or self._get_default_account() or "default",
                         recurrence_rule=(

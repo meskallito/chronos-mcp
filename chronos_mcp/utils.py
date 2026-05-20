@@ -5,8 +5,8 @@ Utility functions for Chronos MCP
 from datetime import datetime, timezone
 from typing import Optional, Tuple, Union
 
-from dateutil import parser
-from icalendar import Event as iEvent
+from dateutil import parser  # type: ignore[import-untyped]
+from icalendar import Event as iEvent  # type: ignore[import-untyped]
 
 from .logging_config import setup_logging
 

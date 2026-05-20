@@ -130,7 +130,7 @@ class BulkOperationManager:
         self,
         calendar_uid: str,
         events: List[Dict[str, Any]],
-        options: BulkOptions = None,
+        options: BulkOptions | None = None,
         account_alias: Optional[str] = None,
     ) -> BulkResult:
         """Create multiple events with configurable error handling."""
@@ -202,7 +202,7 @@ class BulkOperationManager:
                             break
                         elif options.mode == BulkOperationMode.ATOMIC:
                             failed_rollbacks = self._rollback_created_events(
-                                calendar_uid, created_uids
+                                calendar_uid, [uid for uid in created_uids if uid is not None]
                             )
                             result.successful = 0
                             result.failed = len(events)
@@ -231,7 +231,7 @@ class BulkOperationManager:
         self,
         calendar_uid: str,
         tasks: List[Dict[str, Any]],
-        options: BulkOptions = None,
+        options: BulkOptions | None = None,
         account_alias: Optional[str] = None,
     ) -> BulkResult:
         """Create multiple tasks with configurable error handling."""
@@ -290,7 +290,7 @@ class BulkOperationManager:
                             break
                         elif options.mode == BulkOperationMode.ATOMIC:
                             failed_rollbacks = self._rollback_created_tasks(
-                                calendar_uid, created_uids
+                                calendar_uid, [uid for uid in created_uids if uid is not None]
                             )
                             result.successful = 0
                             result.failed = len(tasks)
@@ -316,7 +316,7 @@ class BulkOperationManager:
         self,
         calendar_uid: str,
         journals: List[Dict[str, Any]],
-        options: BulkOptions = None,
+        options: BulkOptions | None = None,
         account_alias: Optional[str] = None,
     ) -> BulkResult:
         """Create multiple journals with configurable error handling."""
@@ -375,7 +375,7 @@ class BulkOperationManager:
                             break
                         elif options.mode == BulkOperationMode.ATOMIC:
                             failed_rollbacks = self._rollback_created_journals(
-                                calendar_uid, created_uids
+                                calendar_uid, [uid for uid in created_uids if uid is not None]
                             )
                             result.successful = 0
                             result.failed = len(journals)
@@ -759,7 +759,7 @@ class BulkOperationManager:
         return failed_rollbacks
 
     def bulk_delete_events(
-        self, calendar_uid: str, event_uids: List[str], options: BulkOptions = None
+        self, calendar_uid: str, event_uids: List[str], options: BulkOptions | None = None
     ) -> BulkResult:
         """Delete multiple events efficiently."""
         if options is None:
@@ -818,7 +818,7 @@ class BulkOperationManager:
         return result
 
     def bulk_delete_tasks(
-        self, calendar_uid: str, task_uids: List[str], options: BulkOptions = None
+        self, calendar_uid: str, task_uids: List[str], options: BulkOptions | None = None
     ) -> BulkResult:
         """Delete multiple tasks efficiently."""
         if options is None:
@@ -877,7 +877,7 @@ class BulkOperationManager:
         return result
 
     def bulk_delete_journals(
-        self, calendar_uid: str, journal_uids: List[str], options: BulkOptions = None
+        self, calendar_uid: str, journal_uids: List[str], options: BulkOptions | None = None
     ) -> BulkResult:
         """Delete multiple journals efficiently."""
         if options is None:

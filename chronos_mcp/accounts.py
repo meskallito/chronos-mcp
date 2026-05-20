@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, Optional
 
-import caldav
+import caldav  # type: ignore[import-untyped,import-not-found]
 from caldav import DAVClient, Principal
 
 from .config import ConfigManager

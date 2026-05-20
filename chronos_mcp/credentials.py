@@ -9,12 +9,12 @@ from typing import Any, Dict, Optional
 
 # Try to import keyring, but handle its absence gracefully
 try:
-    import keyring
+    import keyring  # type: ignore[import-untyped]
 
     KEYRING_AVAILABLE = True
 except ImportError:
     KEYRING_AVAILABLE = False
-    keyring = None
+    keyring = None  # type: ignore[assignment]
 
 from .logging_config import setup_logging
 

@@ -27,7 +27,7 @@ from ..validation import InputValidator
 logger = setup_logging()
 
 # Module-level managers dictionary for dependency injection
-_managers = {}
+_managers: Dict[str, Any] = {}
 
 
 # Event tool functions - defined as standalone functions for importability
@@ -564,6 +564,15 @@ async def search_events(
             else:
                 # Search all calendars
                 calendar_manager = _managers.get("calendar_manager")
+                if calendar_manager is None:
+                    return {
+                        "success": True,
+                        "matches": [],
+                        "total": 0,
+                        "truncated": False,
+                        "query": query,
+                        "request_id": request_id,
+                    }
                 calendars = calendar_manager.list_calendars(account)
                 events = []
                 for cal in calendars:
@@ -655,12 +664,12 @@ def register_event_tools(mcp, managers):
 
 # Add .fn attribute to each function for backwards compatibility with tests
 # This mimics the behavior of FastMCP decorated functions
-create_event.fn = create_event
-get_events_range.fn = get_events_range
-delete_event.fn = delete_event
-update_event.fn = update_event
-create_recurring_event.fn = create_recurring_event
-search_events.fn = search_events
+create_event.fn = create_event  # type: ignore[attr-defined]
+get_events_range.fn = get_events_range  # type: ignore[attr-defined]
+delete_event.fn = delete_event  # type: ignore[attr-defined]
+update_event.fn = update_event  # type: ignore[attr-defined]
+create_recurring_event.fn = create_recurring_event  # type: ignore[attr-defined]
+search_events.fn = search_events  # type: ignore[attr-defined]
 
 
 # Export all tools for backwards compatibility

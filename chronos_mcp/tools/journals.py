@@ -16,7 +16,7 @@ from .base import create_success_response, handle_tool_errors
 logger = setup_logging()
 
 # Module-level managers dictionary for dependency injection
-_managers = {}
+_managers: Dict[str, Any] = {}
 
 
 # Journal tool functions - defined as standalone functions for importability
@@ -200,7 +200,7 @@ async def update_journal(
     description: Optional[str] = Field(None, description="Journal entry content"),
     entry_date: Optional[str] = Field(None, description="Journal entry date (ISO format)"),
     account: Optional[str] = Field(None, description="Account alias"),
-    request_id: str = None,
+    request_id: str | None = None,
 ) -> Dict[str, Any]:
     """Update an existing journal entry. Only provided fields will be updated."""
     # Validate inputs
@@ -244,7 +244,7 @@ async def delete_journal(
     calendar_uid: str = Field(..., description="Calendar UID"),
     journal_uid: str = Field(..., description="Journal UID to delete"),
     account: Optional[str] = Field(None, description="Account alias"),
-    request_id: str = None,
+    request_id: str | None = None,
 ) -> Dict[str, Any]:
     """Delete a journal entry"""
     _managers["journal_manager"].delete_journal(
@@ -274,10 +274,10 @@ def register_journal_tools(mcp, managers):
 
 
 # Add .fn attribute to each function for backwards compatibility with tests
-create_journal.fn = create_journal
-list_journals.fn = list_journals
-update_journal.fn = update_journal
-delete_journal.fn = delete_journal
+create_journal.fn = create_journal  # type: ignore[attr-defined]
+list_journals.fn = list_journals  # type: ignore[attr-defined]
+update_journal.fn = update_journal  # type: ignore[attr-defined]
+delete_journal.fn = delete_journal  # type: ignore[attr-defined]
 
 
 # Export all tools for backwards compatibility

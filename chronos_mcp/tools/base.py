@@ -46,12 +46,12 @@ def handle_tool_errors(func):
     return wrapper
 
 
-def create_success_response(message: str, request_id: str, **kwargs) -> Dict[str, Any]:
+def create_success_response(message: str, request_id: str | None, **kwargs) -> Dict[str, Any]:
     """Create a standardized success response"""
     response = {
         "success": True,
         "message": message,
-        "request_id": request_id,
+        "request_id": request_id or "",
     }
     response.update(kwargs)
     return response

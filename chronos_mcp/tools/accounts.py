@@ -7,12 +7,12 @@ from typing import Any, Dict, Optional
 from pydantic import Field
 
 from ..exceptions import AccountNotFoundError
-from ..models import Account
+from ..models import Account, AccountStatus
 from ..validation import InputValidator
 from .base import create_success_response, handle_tool_errors
 
 # Module-level managers dictionary for dependency injection
-_managers = {}
+_managers: Dict[str, Any] = {}
 
 
 # Account tool functions - defined as standalone functions for importability
@@ -27,7 +27,7 @@ async def add_account(
         False,
         description="Allow localhost/private IPs (WARNING: only for development/testing)",
     ),
-    request_id: str = None,
+    request_id: str | None = None,
 ) -> Dict[str, Any]:
     """Add a new CalDAV account to Chronos
 
@@ -46,10 +46,12 @@ async def add_account(
 
     account = Account(
         alias=alias,
-        url=url,
+        url=url,  # type: ignore[arg-type]
         username=username,
         password=password,
         display_name=display_name or alias,
+        status=AccountStatus.UNKNOWN,
+        last_sync=None,
     )
     _managers["config_manager"].add_account(account)
 
@@ -86,7 +88,7 @@ async def list_accounts() -> Dict[str, Any]:
 @handle_tool_errors
 async def remove_account(
     alias: str = Field(..., description="Account alias to remove"),
-    request_id: str = None,
+    request_id: str | None = None,
 ) -> Dict[str, Any]:
     """Remove a CalDAV account from Chronos"""
     if not _managers["config_manager"].get_account(alias):
@@ -122,10 +124,10 @@ def register_account_tools(mcp, managers):
 
 
 # Add .fn attribute to each function for backwards compatibility with tests
-add_account.fn = add_account
-list_accounts.fn = list_accounts
-remove_account.fn = remove_account
-test_account.fn = test_account
+add_account.fn = add_account  # type: ignore[attr-defined]
+list_accounts.fn = list_accounts  # type: ignore[attr-defined]
+remove_account.fn = remove_account  # type: ignore[attr-defined]
+test_account.fn = test_account  # type: ignore[attr-defined]
 
 
 # Export all tools for backwards compatibility

@@ -5,7 +5,7 @@ Calendar operations for Chronos MCP
 import uuid
 from typing import List, Optional
 
-import caldav
+import caldav  # type: ignore[import-untyped,import-not-found]
 from caldav import Calendar as CalDAVCalendar
 
 from .accounts import AccountManager
@@ -54,7 +54,9 @@ class CalendarManager:
                     name=cal.name or "Unnamed Calendar",
                     description=None,  # Will need to fetch from properties
                     color=None,  # Will need to fetch from properties
-                    account_alias=account_alias or self.accounts.config.config.default_account,
+                    account_alias=account_alias
+                    or self.accounts.config.config.default_account
+                    or "",
                     url=str(cal.url),
                     read_only=False,  # Will need to check permissions
                 )
@@ -95,7 +97,7 @@ class CalendarManager:
                 name=name,
                 description=description,
                 color=color,
-                account_alias=account_alias or self.accounts.config.config.default_account,
+                account_alias=account_alias or self.accounts.config.config.default_account or "",
                 url=str(cal.url),
                 read_only=False,
             )

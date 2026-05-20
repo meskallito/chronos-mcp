@@ -15,10 +15,10 @@ from .base import handle_tool_errors
 logger = setup_logging()
 
 # Module-level managers dictionary for dependency injection
-_managers = {}
+_managers: Dict[str, Any] = {}
 
 
-def _format_bulk_response(result, request_id: str, **extra_fields) -> Dict[str, Any]:
+def _format_bulk_response(result, request_id: str | None, **extra_fields) -> Dict[str, Any]:
     """Format bulk operation response with consistent success indicators"""
     response = {
         "success": result.failed == 0,  # Only true if ALL succeed
@@ -26,7 +26,7 @@ def _format_bulk_response(result, request_id: str, **extra_fields) -> Dict[str, 
         "total": result.total,
         "succeeded": result.successful,
         "failed": result.failed,
-        "request_id": request_id,
+        "request_id": request_id or "",
     }
 
     # Add any extra fields
@@ -222,7 +222,7 @@ async def bulk_delete_events(
     mode: str = Field("continue", description="Operation mode"),
     parallel: bool = Field(True, description="Execute operations in parallel"),
     account: Optional[str] = Field(None, description="Account alias"),
-    request_id: str = None,
+    request_id: str | None = None,
 ) -> Dict[str, Any]:
     """Delete multiple events in bulk"""
     # Ensure managers are available for backwards compatibility with tests
@@ -278,7 +278,7 @@ async def bulk_create_tasks(
     mode: str = Field("continue", description="Operation mode"),
     parallel: bool = Field(True, description="Execute operations in parallel"),
     account: Optional[str] = Field(None, description="Account alias"),
-    request_id: str = None,
+    request_id: str | None = None,
 ) -> Dict[str, Any]:
     """Create multiple tasks in bulk"""
     import json
@@ -346,7 +346,7 @@ async def bulk_delete_tasks(
     mode: str = Field("continue", description="Operation mode"),
     parallel: bool = Field(True, description="Execute operations in parallel"),
     account: Optional[str] = Field(None, description="Account alias"),
-    request_id: str = None,
+    request_id: str | None = None,
 ) -> Dict[str, Any]:
     """Delete multiple tasks in bulk"""
     # Ensure managers are available for backwards compatibility with tests
@@ -396,7 +396,7 @@ async def bulk_create_journals(
     mode: str = Field("continue", description="Operation mode"),
     parallel: bool = Field(True, description="Execute operations in parallel"),
     account: Optional[str] = Field(None, description="Account alias"),
-    request_id: str = None,
+    request_id: str | None = None,
 ) -> Dict[str, Any]:
     """Create multiple journal entries in bulk"""
     import json
@@ -465,7 +465,7 @@ async def bulk_delete_journals(
     mode: str = Field("continue", description="Operation mode"),
     parallel: bool = Field(True, description="Execute operations in parallel"),
     account: Optional[str] = Field(None, description="Account alias"),
-    request_id: str = None,
+    request_id: str | None = None,
 ) -> Dict[str, Any]:
     """Delete multiple journal entries in bulk"""
     # Ensure managers are available for backwards compatibility with tests
@@ -526,12 +526,12 @@ def register_bulk_tools(mcp, managers):
 
 # Add .fn attribute to each function for backwards compatibility with tests
 # This mimics the behavior of FastMCP decorated functions
-bulk_create_events.fn = bulk_create_events
-bulk_delete_events.fn = bulk_delete_events
-bulk_create_tasks.fn = bulk_create_tasks
-bulk_delete_tasks.fn = bulk_delete_tasks
-bulk_create_journals.fn = bulk_create_journals
-bulk_delete_journals.fn = bulk_delete_journals
+bulk_create_events.fn = bulk_create_events  # type: ignore[attr-defined]
+bulk_delete_events.fn = bulk_delete_events  # type: ignore[attr-defined]
+bulk_create_tasks.fn = bulk_create_tasks  # type: ignore[attr-defined]
+bulk_delete_tasks.fn = bulk_delete_tasks  # type: ignore[attr-defined]
+bulk_create_journals.fn = bulk_create_journals  # type: ignore[attr-defined]
+bulk_delete_journals.fn = bulk_delete_journals  # type: ignore[attr-defined]
 
 
 # Export all tools for backwards compatibility

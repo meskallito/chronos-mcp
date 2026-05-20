@@ -23,7 +23,7 @@ from .base import create_success_response, handle_tool_errors
 logger = setup_logging()
 
 # Module-level managers dictionary for dependency injection
-_managers = {}
+_managers: Dict[str, Any] = {}
 
 
 # Task tool functions - defined as standalone functions for importability
@@ -284,7 +284,7 @@ async def update_task(
         None, description="Completion percentage (0-100)"
     ),
     account: Optional[str] = Field(None, description="Account alias"),
-    request_id: str = None,
+    request_id: str | None = None,
 ) -> Dict[str, Any]:
     """Update an existing task. Only provided fields will be updated."""
     # Handle type conversion for parameters that might come as strings from MCP
@@ -369,7 +369,7 @@ async def delete_task(
     calendar_uid: str = Field(..., description="Calendar UID"),
     task_uid: str = Field(..., description="Task UID to delete"),
     account: Optional[str] = Field(None, description="Account alias"),
-    request_id: str = None,
+    request_id: str | None = None,
 ) -> Dict[str, Any]:
     """Delete a task"""
     _managers["task_manager"].delete_task(
@@ -399,10 +399,10 @@ def register_task_tools(mcp, managers):
 
 
 # Add .fn attribute to each function for backwards compatibility with tests
-create_task.fn = create_task
-list_tasks.fn = list_tasks
-update_task.fn = update_task
-delete_task.fn = delete_task
+create_task.fn = create_task  # type: ignore[attr-defined]
+list_tasks.fn = list_tasks  # type: ignore[attr-defined]
+update_task.fn = update_task  # type: ignore[attr-defined]
+delete_task.fn = delete_task  # type: ignore[attr-defined]
 
 
 # Export all tools for backwards compatibility

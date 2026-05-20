@@ -8,7 +8,7 @@ eliminating code duplication across events, tasks, and journals managers.
 import logging
 from typing import Any, Optional
 
-from icalendar import Calendar as iCalendar
+from icalendar import Calendar as iCalendar  # type: ignore[import-untyped]
 
 logger = logging.getLogger(__name__)
 
@@ -73,10 +73,10 @@ def get_item_with_fallback(
         raise ValueError(f"Invalid item_type: {item_type}. Must be 'event', 'task', or 'journal'")
 
     config = type_config[item_type]
-    by_uid_method = config["by_uid_method"]
-    list_method = config["list_method"]
-    fallback_method = config["fallback_method"]
-    component_name = config["component_name"]
+    by_uid_method = config["by_uid_method"]  # type: ignore[index]
+    list_method = config["list_method"]  # type: ignore[index]
+    fallback_method = config["fallback_method"]  # type: ignore[index]
+    component_name = config["component_name"]  # type: ignore[index]
 
     # Method 1: Try direct UID lookup if available
     if hasattr(calendar, by_uid_method):
@@ -116,7 +116,7 @@ def get_item_with_fallback(
             # Check if UID matches in the raw data (fast check)
             # Handle both bytes (real CalDAV) and string (test mocks)
             if isinstance(item.data, bytes):
-                uid_to_check = uid.encode("utf-8")
+                uid_to_check: bytes | str = uid.encode("utf-8")
             else:
                 uid_to_check = uid
 

@@ -14,7 +14,7 @@ from .base import create_success_response, handle_tool_errors
 logger = setup_logging()
 
 # Module-level managers dictionary for dependency injection
-_managers = {}
+_managers: Dict[str, Any] = {}
 
 
 # Calendar tool functions - defined as standalone functions for importability
@@ -85,7 +85,7 @@ async def delete_calendar(
     account: Optional[str] = Field(
         None, description="Account alias (uses default if not specified)"
     ),
-    request_id: str = None,
+    request_id: str | None = None,
 ) -> Dict[str, Any]:
     """Delete a calendar"""
     # Validate inputs
@@ -114,9 +114,9 @@ def register_calendar_tools(mcp, managers):
 
 
 # Add .fn attribute to each function for backwards compatibility with tests
-list_calendars.fn = list_calendars
-create_calendar.fn = create_calendar
-delete_calendar.fn = delete_calendar
+list_calendars.fn = list_calendars  # type: ignore[attr-defined]
+create_calendar.fn = create_calendar  # type: ignore[attr-defined]
+delete_calendar.fn = delete_calendar  # type: ignore[attr-defined]
 
 
 # Export all tools for backwards compatibility
