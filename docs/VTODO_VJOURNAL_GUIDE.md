@@ -74,19 +74,8 @@ Create multiple tasks efficiently with error handling modes.
 ```json
 {
   "calendar_uid": "calendar-123",
-  "tasks": [
-    {
-      "summary": "Research phase",
-      "due": "2025-01-15T10:00:00Z",
-      "priority": 1
-    },
-    {
-      "summary": "Implementation phase",
-      "due": "2025-02-01T10:00:00Z",
-      "priority": 2
-    }
-  ],
-  "mode": "continue"  // Options: continue, fail_fast, atomic
+  "tasks_json": "[{\"summary\": \"Research phase\", \"due\": \"2025-01-15T10:00:00Z\", \"priority\": 1}, {\"summary\": \"Implementation phase\", \"due\": \"2025-02-01T10:00:00Z\", \"priority\": 2}]",
+  "mode": "continue"
 }
 ```
 
@@ -221,9 +210,8 @@ For efficiency when working with multiple items:
 # Bulk create tasks with atomic mode (all succeed or all fail)
 bulk_create_tasks(
     calendar_uid="calendar-123",
-    tasks=[...],
-    mode="atomic",
-    validate_before_execute=True
+    tasks_json='[{"summary": "Research", "due": "2025-01-15T10:00:00Z", "priority": 1}]',
+    mode="atomic"
 )
 
 # Bulk delete with continue mode (process all, report failures)
@@ -236,10 +224,7 @@ bulk_delete_tasks(
 # Bulk create journal entries
 bulk_create_journals(
     calendar_uid="calendar-123",
-    journals=[
-        {"summary": "Sprint Retrospective", "description": "What went well..."},
-        {"summary": "Design Review Notes", "description": "Approved final mockups"}
-    ],
+    journals_json='[{"summary": "Sprint Retro", "description": "What went well..."}, {"summary": "Design Review", "description": "Approved mockups"}]',
     mode="atomic"
 )
 

@@ -30,7 +30,7 @@ jobs:
       run: isort --check-only chronos_mcp tests
 
     - name: Run Black
-      run: black --target-version py311 --check chronos_mcp tests
+      run: black --check chronos_mcp tests
 
     - name: Run Flake8
       run: flake8 chronos_mcp tests --max-line-length=100
