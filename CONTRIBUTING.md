@@ -26,8 +26,8 @@ Enhancement suggestions are tracked as GitHub issues. Create an issue using our 
 
 Unsure where to begin contributing? You can start by looking through these `beginner` and `help-wanted` issues:
 
-* [Beginner issues](https://github.com/chronos-mcp/chronos-mcp/labels/beginner) - issues which should only require a few lines of code
-* [Help wanted issues](https://github.com/chronos-mcp/chronos-mcp/labels/help%20wanted) - issues which should be a bit more involved
+* [Beginner issues](https://github.com/democratize-technology/chronos-mcp/labels/beginner) - issues which should only require a few lines of code
+* [Help wanted issues](https://github.com/democratize-technology/chronos-mcp/labels/help%20wanted) - issues which should be a bit more involved
 
 ### Development Setup
 
@@ -50,10 +50,10 @@ Unsure where to begin contributing? You can start by looking through these `begi
    pre-commit install
    ```
 
-4. Create a test CalDAV server (we recommend Radicale):
+4. Create a test CalDAV server (optional, for integration testing):
    ```bash
    pip install radicale
-   python -m radicale --config tests/fixtures/radicale.conf
+   python -m radicale
    ```
 
 ### Pull Request Process
@@ -82,7 +82,7 @@ make test  # Runs all tests
 * Write unit tests for all new functionality
 * Ensure all tests pass before submitting PR
 * Aim for >80% code coverage
-* Test with multiple Python versions (3.9, 3.10, 3.11, 3.12)
+* Test with multiple Python versions (3.10, 3.11, 3.12, 3.13)
 
 ### Documentation
 

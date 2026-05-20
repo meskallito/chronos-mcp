@@ -9,57 +9,57 @@ graph TB
     subgraph "Client Layer"
         CLIENT[MCP Client/Claude]
     end
-    
+
     subgraph "MCP Interface Layer"
         SERVER[MCP Server]
         TOOLS[Tool Definitions]
         VALID[Input Validation]
     end
-    
+
     subgraph "Business Logic Layer"
         CONFIG[ConfigManager]
         ACCOUNTS[AccountManager]
         CALENDARS[CalendarManager]
         EVENTS[EventManager]
     end
-    
+
     subgraph "CalDAV Integration Layer"
         CALDAV[CalDAV Client]
         AUTH[Authentication]
         PARSER[iCal Parser]
     end
-    
+
     subgraph "Data Layer"
         MODELS[Pydantic Models]
         STORAGE[Config Storage]
         CACHE[Connection Cache]
     end
-    
+
     subgraph "External Systems"
         CALDAV_SERVER[CalDAV Servers]
     end
-    
+
     CLIENT -->|MCP Protocol| SERVER
     SERVER --> TOOLS
     TOOLS --> VALID
-    
+
     VALID --> CONFIG
     VALID --> ACCOUNTS
     VALID --> CALENDARS
     VALID --> EVENTS
-    
+
     ACCOUNTS --> CONFIG
     CALENDARS --> ACCOUNTS
     EVENTS --> CALENDARS
-    
+
     ACCOUNTS --> CALDAV
     CALDAV --> AUTH
     CALDAV --> PARSER
-    
+
     CONFIG --> STORAGE
     ACCOUNTS --> CACHE
     PARSER --> MODELS
-    
+
     CALDAV -->|HTTP/WebDAV| CALDAV_SERVER
 ```
 
@@ -99,7 +99,7 @@ sequenceDiagram
     participant Manager
     participant CalDAV
     participant Server
-    
+
     User->>MCP: Tool Request
     MCP->>Validation: Validate Input
     Validation->>Manager: Process Request
@@ -119,11 +119,11 @@ sequenceDiagram
     participant Cache
     participant CalDAV
     participant Server
-    
+
     Manager->>Config: Get Account
     Config-->>Manager: Credentials
     Manager->>Cache: Check Connection
-    
+
     alt Connection Exists
         Cache-->>Manager: Cached Client
     else No Connection
@@ -145,35 +145,35 @@ graph LR
         CALENDARS[calendars.py]
         EVENTS[events.py]
     end
-    
+
     subgraph "Support Modules"
         MODELS[models.py]
         UTILS[utils.py]
         LOGGING[logging_config.py]
     end
-    
+
     subgraph "Entry Points"
         SERVER[server.py]
         MAIN[__main__.py]
     end
-    
+
     ACCOUNTS --> CONFIG
     CALENDARS --> ACCOUNTS
     EVENTS --> CALENDARS
-    
+
     CONFIG --> MODELS
     ACCOUNTS --> MODELS
     CALENDARS --> MODELS
     EVENTS --> MODELS
     EVENTS --> UTILS
-    
+
     SERVER --> CONFIG
     SERVER --> ACCOUNTS
     SERVER --> CALENDARS
     SERVER --> EVENTS
-    
+
     MAIN --> SERVER
-    
+
     style CONFIG fill:#f9f,stroke:#333,stroke-width:2px
     style MODELS fill:#9ff,stroke:#333,stroke-width:2px
 ```
@@ -189,32 +189,32 @@ graph TB
         CALDAV[CalDAV Protocol]
         PARSE[Parsing Errors]
     end
-    
+
     subgraph "Error Handling"
         CATCH[Exception Catching]
         LOG[Error Logging]
         SANITIZE[Error Sanitization]
     end
-    
+
     subgraph "Error Response"
         SAFE[Safe Error Message]
         CODE[Error Code]
         REQ_ID[Request ID]
     end
-    
+
     INPUT --> CATCH
     NETWORK --> CATCH
     AUTH --> CATCH
     CALDAV --> CATCH
     PARSE --> CATCH
-    
+
     CATCH --> LOG
     CATCH --> SANITIZE
-    
+
     SANITIZE --> SAFE
     SANITIZE --> CODE
     SANITIZE --> REQ_ID
-    
+
     SAFE --> |User Response| USER[User]
     LOG --> |Full Details| LOGS[Log File]
 ```
@@ -231,27 +231,27 @@ graph TB
         ERROR_SAN[Error Sanitization]
         LOG_MASK[Log Masking]
     end
-    
+
     subgraph "Data Protection"
         CONFIG_FILE[Config File<br/>Plain Text]
         MEMORY[In-Memory<br/>Credentials]
         LOGS[Log Files<br/>Masked]
     end
-    
+
     subgraph "Future Enhancements"
         KEYRING[OS Keyring]
         OAUTH[OAuth2]
         ENCRYPT[Encrypted Config]
     end
-    
+
     INPUT_VAL --> |Prevent Injection| AUTH_LAYER
     AUTH_LAYER --> |Hide Errors| ERROR_SAN
     ERROR_SAN --> |Mask Sensitive| LOG_MASK
-    
+
     CONFIG_FILE -.->|Future| KEYRING
     CONFIG_FILE -.->|Future| ENCRYPT
     MEMORY -.->|Future| OAUTH
-    
+
     style CONFIG_FILE fill:#faa,stroke:#333,stroke-width:2px
     style KEYRING fill:#afa,stroke:#333,stroke-width:2px
     style OAUTH fill:#afa,stroke:#333,stroke-width:2px
@@ -273,7 +273,7 @@ classDiagram
         +save_config()
         +load_config()
     }
-    
+
     class AccountManager {
         +ConfigManager config
         +Dict connections
@@ -283,7 +283,7 @@ classDiagram
         +test_account()
         +get_principal()
     }
-    
+
     class CalendarManager {
         +AccountManager accounts
         +list_calendars()
@@ -291,7 +291,7 @@ classDiagram
         +delete_calendar()
         +get_calendar()
     }
-    
+
     class EventManager {
         +CalendarManager calendars
         +create_event()
@@ -300,7 +300,7 @@ classDiagram
         -_parse_caldav_event()
         -_parse_attendee()
     }
-    
+
     class Account {
         +str alias
         +HttpUrl url
@@ -308,7 +308,7 @@ classDiagram
         +str password
         +AccountStatus status
     }
-    
+
     class Calendar {
         +str uid
         +str name
@@ -317,7 +317,7 @@ classDiagram
         +str account_alias
         +bool read_only
     }
-    
+
     class Event {
         +str uid
         +str summary
@@ -326,12 +326,12 @@ classDiagram
         +List~Attendee~ attendees
         +List~Alarm~ alarms
     }
-    
+
     ConfigManager --> Account : manages
     AccountManager --> ConfigManager : uses
     CalendarManager --> AccountManager : uses
     EventManager --> CalendarManager : uses
-    
+
     CalendarManager --> Calendar : creates
     EventManager --> Event : creates
 ```
@@ -342,17 +342,17 @@ classDiagram
 ```mermaid
 stateDiagram-v2
     [*] --> Disconnected
-    
+
     Disconnected --> Connecting : connect_account()
     Connecting --> Connected : Success
     Connecting --> Error : Failed
-    
+
     Connected --> Disconnected : disconnect_account()
     Connected --> Error : Connection Lost
-    
+
     Error --> Connecting : Retry
     Error --> Disconnected : Give Up
-    
+
     Connected --> Active : Making Request
     Active --> Connected : Request Complete
     Active --> Error : Request Failed
@@ -362,17 +362,17 @@ stateDiagram-v2
 ```mermaid
 stateDiagram-v2
     [*] --> Created : create_event()
-    
+
     Created --> Validated : Input Validation
     Validated --> Formatted : Build iCal
     Formatted --> Sent : Send to Server
-    
+
     Sent --> Stored : Server Accept
     Sent --> Failed : Server Reject
-    
+
     Stored --> Retrieved : get_events_range()
     Stored --> Deleted : delete_event()
-    
+
     Failed --> [*]
     Deleted --> [*]
 ```
@@ -387,23 +387,23 @@ graph TB
         CONFIG_VOL[Config Volume]
         LOG_VOL[Log Volume]
     end
-    
+
     subgraph "Host System"
         STDIO[STDIO]
         CONFIG_DIR[~/.config/chronos-mcp]
         LOG_DIR[/var/log/chronos-mcp]
     end
-    
+
     subgraph "Network"
         CALDAV1[CalDAV Server 1]
         CALDAV2[CalDAV Server 2]
         CALDAVN[CalDAV Server N]
     end
-    
+
     STDIO <--> APP
     CONFIG_DIR <--> CONFIG_VOL
     LOG_DIR <--> LOG_VOL
-    
+
     APP --> |HTTPS| CALDAV1
     APP --> |HTTPS| CALDAV2
     APP --> |HTTPS| CALDAVN
@@ -416,25 +416,25 @@ graph LR
         CLAUDE[Claude/LLM]
         MCP_CLIENT[MCP Client]
     end
-    
+
     subgraph "MCP Servers"
         CHRONOS[Chronos MCP]
         OTHER1[File System MCP]
         OTHER2[Database MCP]
     end
-    
+
     subgraph "Calendar Systems"
         GOOGLE[Google Calendar]
         NEXTCLOUD[Nextcloud]
         EXCHANGE[Exchange]
         APPLE[iCloud]
     end
-    
+
     CLAUDE --> MCP_CLIENT
     MCP_CLIENT --> CHRONOS
     MCP_CLIENT --> OTHER1
     MCP_CLIENT --> OTHER2
-    
+
     CHRONOS --> |CalDAV| GOOGLE
     CHRONOS --> |CalDAV| NEXTCLOUD
     CHRONOS --> |CalDAV| EXCHANGE
@@ -451,13 +451,13 @@ graph LR
         CACHE_CHECK[Check Cache]
         VALIDATE[Validate Input]
     end
-    
+
     subgraph "Network Operations O(n)"
         AUTH[Authenticate]
         LIST_CAL[List Calendars]
         GET_EVENTS[Get Events]
     end
-    
+
     subgraph "Heavy Operations O(n²)"
         BULK_CREATE[Bulk Create]
         CONFLICT_CHECK[Conflict Detection]
@@ -473,23 +473,23 @@ graph TB
         PRINCIPALS[Principal Objects]
         CONFIG[Configuration]
     end
-    
+
     subgraph "Not Cached"
         CALENDARS[Calendar List]
         EVENTS[Event Data]
         PROPS[Calendar Properties]
     end
-    
+
     subgraph "Future Caching"
         CAL_META[Calendar Metadata<br/>TTL: 5 min]
         EVENT_CACHE[Recent Events<br/>TTL: 1 min]
         ETAG[ETag Support]
     end
-    
+
     CONNECTIONS --> |Reused| REQUESTS[All Requests]
     PRINCIPALS --> |Reused| CAL_OPS[Calendar Ops]
     CONFIG --> |Static| ALL[All Operations]
-    
+
     style CAL_META fill:#ffa,stroke:#333,stroke-width:2px,stroke-dasharray: 5 5
     style EVENT_CACHE fill:#ffa,stroke:#333,stroke-width:2px,stroke-dasharray: 5 5
     style ETAG fill:#ffa,stroke:#333,stroke-width:2px,stroke-dasharray: 5 5
@@ -511,23 +511,23 @@ graph TB
         SINGLE[Single Thread]
         NO_POOL[No Pooling]
     end
-    
+
     subgraph "Enhanced Architecture"
         ASYNC[Async Support]
         POOL[Connection Pool]
         QUEUE[Request Queue]
     end
-    
+
     subgraph "Distributed Architecture"
         WORKERS[Worker Processes]
         REDIS[Redis Cache]
         LB[Load Balancer]
     end
-    
+
     SYNC --> ASYNC
     SINGLE --> POOL
     NO_POOL --> QUEUE
-    
+
     ASYNC --> WORKERS
     POOL --> REDIS
     QUEUE --> LB
@@ -538,7 +538,7 @@ graph TB
 | Layer | Technology | Purpose |
 |-------|------------|---------|
 | Protocol | MCP (Model Context Protocol) | AI tool interface |
-| Language | Python 3.9+ | Implementation language |
+| Language | Python 3.10+ | Implementation language |
 | Framework | None (stdlib) | Minimal dependencies |
 | Models | Pydantic 2.x | Data validation |
 | CalDAV | python-caldav | CalDAV protocol |

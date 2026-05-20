@@ -17,7 +17,6 @@ Please delete options that are not relevant.
 Please describe the tests that you ran to verify your changes. Provide instructions so we can reproduce.
 
 - [ ] Unit tests pass (`pytest tests/unit/`)
-- [ ] Integration tests pass (`pytest tests/integration/`)
 - [ ] Manual testing with real CalDAV server
 - [ ] Tested with multiple CalDAV providers
 
