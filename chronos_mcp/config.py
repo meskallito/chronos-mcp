@@ -5,13 +5,13 @@ Configuration management for Chronos MCP
 import json
 import os
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, HttpUrl
 
 from .credentials import get_credential_manager
 from .logging_config import setup_logging
-from .models import Account
+from .models import Account, AccountStatus
 
 logger = setup_logging()
 
@@ -29,7 +29,7 @@ class ConfigManager:
     def __init__(self):
         self.config_dir = Path.home() / ".chronos"
         self.config_file = self.config_dir / "accounts.json"
-        self.config: ChronosConfig = ChronosConfig()
+        self.config: ChronosConfig = ChronosConfig(default_account=None)
         self._load_config()
 
     def _load_config(self):
@@ -80,10 +80,12 @@ class ConfigManager:
         if env_url and env_username:
             env_account = Account(
                 alias="default",
-                url=env_url,
+                url=HttpUrl(env_url),
                 username=env_username,
                 password=env_password,
                 display_name="Default Account (from environment)",
+                status=AccountStatus.UNKNOWN,
+                last_sync=None,
             )
 
             if "default" not in self.config.accounts:
@@ -107,7 +109,10 @@ class ConfigManager:
 
         credential_manager = get_credential_manager()
 
-        data = {"accounts": {}, "default_account": self.config.default_account}
+        data: Dict[str, Any] = {
+            "accounts": {},
+            "default_account": self.config.default_account,
+        }
 
         for alias, acc in self.config.accounts.items():
             account_data = {

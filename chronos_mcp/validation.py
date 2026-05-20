@@ -65,17 +65,9 @@ class InputValidator:
 
     PATTERNS = {
         "uid": re.compile(r"^[a-zA-Z0-9\-_.@]+$"),
-        "email": re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"),
-        "url": re.compile(
-            r"^https://(?:[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*\.[a-zA-Z]{2,}"
-            r"|[a-zA-Z0-9-]+|localhost"
-            r"|(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}"
-            r"(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?))"
-            r"(?::(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}"
-            r"|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?"
-            r"(?:/[^\s]*)?$"
-        ),
         "color": re.compile(r"^#[0-9A-Fa-f]{6}$"),
+        # Simple URL pattern for backward compatibility (deprecated - use validate_url instead)
+        "url": re.compile(r"^https://", re.IGNORECASE),
     }
 
     # ReDoS-safe patterns with simplified regex and input length limits
@@ -255,16 +247,19 @@ class InputValidator:
 
     @classmethod
     def validate_email(cls, email: str) -> str:
-        """Validate email address."""
+        """Validate email address using email-validator library."""
+        from email_validator import validate_email as ev
+
         email = email.strip().lower()
 
         if len(email) > cls.MAX_LENGTHS["attendee_email"]:
             raise ValidationError("Email address too long")
 
-        if not cls.PATTERNS["email"].match(email):
+        try:
+            validated = ev(email, check_deliverability=False)
+            return validated.normalized
+        except Exception:
             raise ValidationError(f"Invalid email address format: {email}")
-
-        return email
 
     @classmethod
     def validate_attendees(cls, attendees: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -484,7 +479,7 @@ class InputValidator:
     def validate_url(
         cls, url: str, allow_private_ips: bool = False, field_name: str = "url"
     ) -> str:
-        """Validate URL with SSRF protection.
+        """Validate URL with SSRF protection using urllib.parse.
 
         Args:
             url: The URL to validate
@@ -510,11 +505,33 @@ class InputValidator:
                 f"{field_name} exceeds maximum length of {max_url_len} characters"
             )
 
-        # Check URL format using existing pattern
-        if not cls.PATTERNS["url"].match(url):
+        # Check for credential phishing attempts (@ in URL)
+        if "@" in url:
             raise ValidationError(
-                f"Invalid URL format for {field_name}. Must be a valid HTTPS URL."
+                f"Invalid URL format for {field_name}. "
+                "URLs with '@' are not allowed for security reasons."
             )
+
+        # Use urllib.parse for URL parsing (standard library)
+        try:
+            parsed = urlparse(url)
+            if not parsed.scheme or not parsed.netloc:
+                raise ValidationError(
+                    f"Invalid URL format for {field_name}. Must be a valid HTTPS URL."
+                )
+            if parsed.scheme != "https":
+                raise ValidationError(
+                    f"Invalid URL format for {field_name}. Only HTTPS is allowed for security."
+                )
+
+            # Validate port number if present
+            if parsed.port is not None:
+                if parsed.port < 1 or parsed.port > 65535:
+                    raise ValidationError(
+                        f"Invalid URL format for {field_name}. Port must be between 1 and 65535."
+                    )
+        except ValueError as e:
+            raise ValidationError(f"Invalid URL format for {field_name}: {str(e)}")
 
         # Handle FieldInfo objects from Pydantic Field defaults
         from pydantic.fields import FieldInfo
@@ -526,70 +543,63 @@ class InputValidator:
         if allow_private_ips:
             return url
 
-        # Parse URL for SSRF validation
+        # SSRF protection: Validate hostname
+        hostname = parsed.hostname
+        if not hostname:
+            raise ValidationError(f"Invalid URL format for {field_name}: no hostname found")
+
+        # Check against blocked hostnames (case-insensitive)
+        if hostname.lower() in [h.lower() for h in cls.BLOCKED_HOSTNAMES]:
+            raise ValidationError(
+                f"URL validation failed for {field_name}: "
+                f"localhost and loopback addresses are not allowed for security reasons"
+            )
+
+        # Try to resolve the hostname to check for private IPs
         try:
-            parsed = urlparse(url)
-            hostname = parsed.hostname
+            # Get all IP addresses for the hostname
+            addr_info = socket.getaddrinfo(hostname, None)
+            ip_addresses = set()
 
-            if not hostname:
-                raise ValidationError(f"Invalid URL format for {field_name}: no hostname found")
+            for info in addr_info:
+                # info[4][0] contains the IP address
+                ip_addresses.add(info[4][0])
 
-            # Check against blocked hostnames (case-insensitive)
-            if hostname.lower() in [h.lower() for h in cls.BLOCKED_HOSTNAMES]:
-                raise ValidationError(
-                    f"URL validation failed for {field_name}: "
-                    f"localhost and loopback addresses are not allowed for security reasons"
-                )
+            # Check each resolved IP
+            for ip_str in ip_addresses:
+                try:
+                    ip = ipaddress.ip_address(ip_str)
 
-            # Try to resolve the hostname to check for private IPs
-            try:
-                # Get all IP addresses for the hostname
-                addr_info = socket.getaddrinfo(hostname, None)
-                ip_addresses = set()
-
-                for info in addr_info:
-                    # info[4][0] contains the IP address
-                    ip_addresses.add(info[4][0])
-
-                # Check each resolved IP
-                for ip_str in ip_addresses:
-                    try:
-                        ip = ipaddress.ip_address(ip_str)
-
-                        # Check if IP is private or in blocked ranges
-                        for private_range in cls.PRIVATE_IP_RANGES:
-                            if ip in private_range:
-                                raise ValidationError(
-                                    f"URL validation failed for {field_name}: "
-                                    f"URL resolves to a private or internal IP address ({ip_str}) "
-                                    f"which is not allowed for security reasons"
-                                )
-
-                        # Additional checks for special addresses
-                        if ip.is_private or ip.is_loopback or ip.is_link_local:
+                    # Check if IP is private or in blocked ranges
+                    for private_range in cls.PRIVATE_IP_RANGES:
+                        if ip in private_range:
                             raise ValidationError(
                                 f"URL validation failed for {field_name}: "
-                                f"URL resolves to a restricted IP address ({ip_str}) "
+                                f"URL resolves to a private or internal IP address ({ip_str}) "
                                 f"which is not allowed for security reasons"
                             )
 
-                    except ValueError:
-                        # If we can't parse as IP, it might be IPv6 or malformed
-                        # Be conservative and reject
-                        pass
+                    # Additional checks for special addresses
+                    if ip.is_private or ip.is_loopback or ip.is_link_local:
+                        raise ValidationError(
+                            f"URL validation failed for {field_name}: "
+                            f"URL resolves to a restricted IP address ({ip_str}) "
+                            f"which is not allowed for security reasons"
+                        )
 
-            except (socket.gaierror, socket.error):
-                # If DNS resolution fails, we should be cautious
-                # Could be a non-existent domain or network issue
-                raise ValidationError(
-                    f"URL validation failed for {field_name}: "
-                    f"Unable to resolve hostname '{hostname}'. "
-                    f"Please verify the URL is correct and accessible."
-                )
+                except ValueError:
+                    # If we can't parse as IP, it might be IPv6 or malformed
+                    # Be conservative and reject
+                    pass
 
-        except ValueError as e:
-            # URL parsing failed
-            raise ValidationError(f"Invalid URL format for {field_name}: {str(e)}")
+        except (socket.gaierror, socket.error, UnicodeError):
+            # If DNS resolution fails, we should be cautious
+            # Could be a non-existent domain or network issue
+            raise ValidationError(
+                f"URL validation failed for {field_name}: "
+                f"Unable to resolve hostname '{hostname}'. "
+                f"Please verify the URL is correct and accessible."
+            )
 
         return url
 

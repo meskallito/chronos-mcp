@@ -177,17 +177,17 @@ class TestEventManager:
     ):
         """Test creating recurring event"""
         mock_calendar_manager.get_calendar.return_value = mock_calendar
-        sample_event_data["recurrence_rule"] = "FREQ=WEEKLY;BYDAY=MO,WE,FR"
+        sample_event_data["recurrence_rule"] = "FREQ=WEEKLY;BYDAY=MO,WE,FR;COUNT=10"
 
         mgr = EventManager(mock_calendar_manager)
         result = mgr.create_event(**sample_event_data)
 
         assert result is not None
-        assert result.recurrence_rule == "FREQ=WEEKLY;BYDAY=MO,WE,FR"
+        assert result.recurrence_rule == "FREQ=WEEKLY;BYDAY=MO,WE,FR;COUNT=10"
 
-        # Check ical contains rrule
+        # Check ical contains rrule (iCalendar reorders: COUNT before BYDAY)
         ical_data = mock_calendar.save_event.call_args[0][0]
-        assert "RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR" in ical_data
+        assert "RRULE:FREQ=WEEKLY;COUNT=10;BYDAY=MO,WE,FR" in ical_data
 
     def test_create_event_all_day(self, mock_calendar_manager, mock_calendar):
         """Test creating all-day event"""
@@ -351,17 +351,17 @@ END:VEVENT"""
             summary="Daily Standup",
             start=datetime.now(),
             end=datetime.now() + timedelta(hours=1),
-            recurrence_rule="FREQ=DAILY;BYDAY=MO,TU,WE,TH,FR",
+            recurrence_rule="FREQ=DAILY;BYDAY=MO,TU,WE,TH,FR;COUNT=20",
         )
 
         assert event is not None
         assert event.summary == "Daily Standup"
-        assert event.recurrence_rule == "FREQ=DAILY;BYDAY=MO,TU,WE,TH,FR"
+        assert event.recurrence_rule == "FREQ=DAILY;BYDAY=MO,TU,WE,TH,FR;COUNT=20"
 
-        # Verify the iCalendar was created with RRULE
+        # Verify the iCalendar was created with RRULE (iCalendar reorders: COUNT before BYDAY)
         mock_calendar.save_event.assert_called_once()
         ical_data = mock_calendar.save_event.call_args[0][0]
-        assert "RRULE:FREQ=DAILY;BYDAY=MO,TU,WE,TH,FR" in ical_data
+        assert "RRULE:FREQ=DAILY;COUNT=20;BYDAY=MO,TU,WE,TH,FR" in ical_data
 
     def test_create_event_with_invalid_rrule(self, mock_calendar_manager, mock_calendar):
         """Test creating event with invalid RRULE raises error"""

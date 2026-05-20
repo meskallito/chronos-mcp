@@ -151,7 +151,7 @@ class CredentialManager:
         Returns:
             Dictionary with status information
         """
-        status = {
+        status: Dict[str, Any] = {
             "keyring_available": self.keyring_available,
             "backend": None,
             "backend_type": None,
