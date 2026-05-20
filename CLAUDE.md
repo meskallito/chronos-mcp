@@ -65,7 +65,17 @@ Chronos MCP is a Model Context Protocol server for CalDAV calendar management bu
    - Handles input validation and error sanitization
    - Maps tool calls to business logic managers
 
-2. **Business Logic Layer** 
+2. **Tool Interface Layer** (`tools/`)
+   - `tools/base.py`: Base tool manager class with connection caching
+   - `tools/accounts.py`: Account management tools
+   - `tools/calendars.py`: Calendar CRUD tools
+   - `tools/events.py`: Event lifecycle tools
+   - `tools/tasks.py`: VTODO task tools
+   - `tools/journals.py`: VJOURNAL journal tools
+   - `tools/bulk.py`: Bulk operation tools
+   - Delegation pattern: server.py delegates to tools/, tools/ delegate to business logic managers
+
+3. **Business Logic Layer**
    - `accounts.py`: Multi-account management with connection caching
    - `calendars.py`: Calendar CRUD operations
    - `events.py`: Event lifecycle including recurring events (RRULE)
@@ -95,6 +105,7 @@ Chronos MCP is a Model Context Protocol server for CalDAV calendar management bu
 ### Key Files to Understand
 
 - `server.py`: Entry point and tool definitions - start here to understand available operations
+- `tools/base.py`: Base tool manager with connection caching and error handling
 - `models.py`: Data structures used throughout the codebase
 - `exceptions.py`: Error handling patterns and custom exceptions
 - `validation.py`: Security-critical input validation logic
@@ -117,10 +128,11 @@ Chronos MCP is a Model Context Protocol server for CalDAV calendar management bu
 
 When adding new CalDAV functionality:
 1. Add Pydantic model to `models.py` if needed
-2. Implement business logic in appropriate manager class
-3. Add tool definition in `server.py` with proper validation
-4. Write unit tests following existing patterns
-5. Update API documentation if adding new tools
+2. Implement business logic in appropriate manager class (e.g., `events.py`)
+3. Add tool wrapper in `tools/<domain>.py` if complex validation needed
+4. Add tool definition in `server.py` with proper validation
+5. Write unit tests following existing patterns
+6. Update API documentation if adding new tools
 
 When fixing bugs:
 1. Check if error handling follows the sanitization pattern

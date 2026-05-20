@@ -21,6 +21,9 @@ graph TB
         ACCOUNTS[AccountManager]
         CALENDARS[CalendarManager]
         EVENTS[EventManager]
+        TASKS[TaskManager]
+        JOURNALS[JournalManager]
+        BULK[BulkOperationManager]
     end
 
     subgraph "CalDAV Integration Layer"
@@ -47,10 +50,20 @@ graph TB
     VALID --> ACCOUNTS
     VALID --> CALENDARS
     VALID --> EVENTS
+    VALID --> TASKS
+    VALID --> JOURNALS
+    VALID --> BULK
 
     ACCOUNTS --> CONFIG
     CALENDARS --> ACCOUNTS
     EVENTS --> CALENDARS
+    TASKS --> CALENDARS
+    JOURNALS --> CALENDARS
+    BULK --> ACCOUNTS
+    BULK --> CALENDARS
+    BULK --> EVENTS
+    BULK --> TASKS
+    BULK --> JOURNALS
 
     ACCOUNTS --> CALDAV
     CALDAV --> AUTH
@@ -77,6 +90,9 @@ graph TB
 - **AccountManager**: Connection lifecycle and authentication
 - **CalendarManager**: Calendar CRUD operations
 - **EventManager**: Event lifecycle management
+- **TaskManager**: VTODO task management
+- **JournalManager**: VJOURNAL journal entry management
+- **BulkOperationManager**: Parallel bulk operations with rollback
 
 #### 3. CalDAV Integration Layer
 - **CalDAV Client**: WebDAV protocol implementation
@@ -144,12 +160,26 @@ graph LR
         ACCOUNTS[accounts.py]
         CALENDARS[calendars.py]
         EVENTS[events.py]
+        TASKS[tasks.py]
+        JOURNALS[journals.py]
+        BULK[bulk.py]
     end
 
     subgraph "Support Modules"
         MODELS[models.py]
         UTILS[utils.py]
         LOGGING[logging_config.py]
+        RRULE[rrule.py]
+        VALIDATION[validation.py]
+    end
+
+    subgraph "Tools Layer"
+        TOOLS_BASE[tools/base.py]
+        TOOLS_ACCOUNTS[tools/accounts.py]
+        TOOLS_EVENTS[tools/events.py]
+        TOOLS_TASKS[tools/tasks.py]
+        TOOLS_JOURNALS[tools/journals.py]
+        TOOLS_BULK[tools/bulk.py]
     end
 
     subgraph "Entry Points"
@@ -160,22 +190,44 @@ graph LR
     ACCOUNTS --> CONFIG
     CALENDARS --> ACCOUNTS
     EVENTS --> CALENDARS
+    TASKS --> CALENDARS
+    JOURNALS --> CALENDARS
+    BULK --> ACCOUNTS
+    BULK --> CALENDARS
+    BULK --> EVENTS
+    BULK --> TASKS
+    BULK --> JOURNALS
 
     CONFIG --> MODELS
     ACCOUNTS --> MODELS
     CALENDARS --> MODELS
     EVENTS --> MODELS
+    TASKS --> MODELS
+    JOURNALS --> MODELS
     EVENTS --> UTILS
+    TASKS --> UTILS
+    EVENTS --> RRULE
+    VALIDATION --> RRULE
 
-    SERVER --> CONFIG
-    SERVER --> ACCOUNTS
-    SERVER --> CALENDARS
-    SERVER --> EVENTS
+    TOOLS_BASE --> VALIDATION
+    TOOLS_ACCOUNTS --> ACCOUNTS
+    TOOLS_EVENTS --> EVENTS
+    TOOLS_TASKS --> TASKS
+    TOOLS_JOURNALS --> JOURNALS
+    TOOLS_BULK --> BULK
+
+    SERVER --> TOOLS_BASE
+    SERVER --> TOOLS_ACCOUNTS
+    SERVER --> TOOLS_EVENTS
+    SERVER --> TOOLS_TASKS
+    SERVER --> TOOLS_JOURNALS
+    SERVER --> TOOLS_BULK
 
     MAIN --> SERVER
 
     style CONFIG fill:#f9f,stroke:#333,stroke-width:2px
     style MODELS fill:#9ff,stroke:#333,stroke-width:2px
+    style TOOLS_BASE fill:#ff9,stroke:#333,stroke-width:2px
 ```
 
 ## Error Handling Architecture
@@ -301,6 +353,32 @@ classDiagram
         -_parse_attendee()
     }
 
+    class TaskManager {
+        +CalendarManager calendars
+        +create_task()
+        +get_tasks()
+        +update_task()
+        +delete_task()
+        -_parse_caldav_task()
+    }
+
+    class JournalManager {
+        +CalendarManager calendars
+        +create_journal()
+        +get_journals()
+        +update_journal()
+        +delete_journal()
+        -_parse_caldav_journal()
+    }
+
+    class BulkOperationManager {
+        +AccountManager accounts
+        +bulk_create_events()
+        +bulk_create_tasks()
+        +bulk_create_journals()
+        +_execute_with_rollback()
+    }
+
     class Account {
         +str alias
         +HttpUrl url
@@ -327,13 +405,33 @@ classDiagram
         +List~Alarm~ alarms
     }
 
+    class Task {
+        +str uid
+        +str summary
+        +datetime due
+        +TaskStatus status
+        +int priority
+    }
+
+    class Journal {
+        +str uid
+        +str summary
+        +text description
+        +datetime dtstart
+    }
+
     ConfigManager --> Account : manages
     AccountManager --> ConfigManager : uses
     CalendarManager --> AccountManager : uses
     EventManager --> CalendarManager : uses
+    TaskManager --> CalendarManager : uses
+    JournalManager --> CalendarManager : uses
+    BulkOperationManager --> AccountManager : uses
 
     CalendarManager --> Calendar : creates
     EventManager --> Event : creates
+    TaskManager --> Task : creates
+    JournalManager --> Journal : creates
 ```
 
 ## State Management
