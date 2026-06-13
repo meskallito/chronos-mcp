@@ -62,6 +62,31 @@ class TestEventManager:
         assert "cal-123" in str(exc_info.value)
         mock_calendar_manager.get_calendar.assert_called_once()
 
+    def test_create_event_connection_error_not_masked_as_not_found(
+        self, mock_calendar_manager, sample_event_data
+    ):
+        """De-mask end-to-end: a cold-start connect timeout raised by get_calendar
+        surfaces as AccountConnectionError, NOT a misleading CalendarNotFoundError."""
+        from chronos_mcp.exceptions import (
+            AccountConnectionError,
+            CalendarNotFoundError,
+        )
+
+        mock_calendar_manager.get_calendar.side_effect = AccountConnectionError("icloud")
+        mgr = EventManager(mock_calendar_manager)
+
+        with pytest.raises(AccountConnectionError):
+            mgr.create_event(**sample_event_data)
+
+        # And explicitly: it is NOT a CalendarNotFoundError.
+        mock_calendar_manager.get_calendar.side_effect = AccountConnectionError("icloud")
+        try:
+            mgr.create_event(**sample_event_data)
+        except CalendarNotFoundError:  # pragma: no cover - must not happen
+            pytest.fail("connection timeout was masked as CalendarNotFoundError")
+        except AccountConnectionError:
+            pass
+
     @patch("chronos_mcp.events.uuid.uuid4")
     def test_create_event_success(
         self, mock_uuid, mock_calendar_manager, mock_calendar, sample_event_data

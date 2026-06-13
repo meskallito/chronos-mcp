@@ -87,10 +87,43 @@ class TestCalendarManager:
         assert len(result) == 1
         assert result[0].account_alias == "default"
 
-    def test_list_calendars_exception(self, mock_account_manager, mock_principal):
-        """Test calendar listing with exception"""
+    def test_list_calendars_propagates_connection_error(
+        self, mock_account_manager, mock_principal
+    ):
+        """De-mask: a cold timeout from principal.calendars() must NOT become [].
+
+        The old code did `except Exception: return calendars` (empty), masking a
+        transient outage as "0 calendars, no error". Now the error propagates so
+        the tool layer can return a retryable error.
+        """
+        from chronos_mcp.exceptions import AccountConnectionError
+
         mock_account_manager.get_principal.return_value = mock_principal
-        mock_principal.calendars.side_effect = Exception("CalDAV error")
+        mock_principal.calendars.side_effect = AccountConnectionError("test_account")
+
+        mgr = CalendarManager(mock_account_manager)
+        with pytest.raises(AccountConnectionError):
+            mgr.list_calendars("test_account")
+
+    def test_list_calendars_propagates_connection_error_from_principal(
+        self, mock_account_manager
+    ):
+        """De-mask: a connect timeout raised by get_principal propagates through
+        list_calendars (NOT collapsed to an AccountNotFoundError or empty list)."""
+        from chronos_mcp.exceptions import AccountConnectionError
+
+        mock_account_manager.get_principal.side_effect = AccountConnectionError("test_account")
+
+        mgr = CalendarManager(mock_account_manager)
+        with pytest.raises(AccountConnectionError):
+            mgr.list_calendars("test_account")
+
+    def test_list_calendars_empty_account_returns_empty(
+        self, mock_account_manager, mock_principal
+    ):
+        """A genuinely empty (but reachable) account still returns []."""
+        mock_account_manager.get_principal.return_value = mock_principal
+        mock_principal.calendars.return_value = []
 
         mgr = CalendarManager(mock_account_manager)
         result = mgr.list_calendars("test_account")
@@ -265,12 +298,33 @@ class TestCalendarManager:
 
         assert result is None
 
-    def test_get_calendar_exception(self, mock_account_manager, mock_principal):
-        """Test getting calendar with exception"""
+    def test_get_calendar_propagates_connection_error(
+        self, mock_account_manager, mock_principal
+    ):
+        """De-mask: get_calendar must NOT swallow a connection error to None.
+
+        Returning None here is what caused the caller to raise a misleading
+        CalendarNotFoundError when iCloud was merely slow on a cold start.
+        """
+        from chronos_mcp.exceptions import AccountConnectionError
+
         mock_account_manager.get_principal.return_value = mock_principal
-        mock_principal.calendars.side_effect = Exception("CalDAV error")
+        mock_principal.calendars.side_effect = AccountConnectionError("test_account")
 
         mgr = CalendarManager(mock_account_manager)
-        result = mgr.get_calendar("test-calendar", "test_account")
+        with pytest.raises(AccountConnectionError):
+            mgr.get_calendar("test-calendar", "test_account")
 
-        assert result is None
+    def test_get_calendar_propagates_connection_error_from_principal(
+        self, mock_account_manager
+    ):
+        """De-mask PRIMARY path: get_principal's AccountConnectionError propagates
+        through get_calendar instead of collapsing to None (was the masked
+        cold-start timeout site)."""
+        from chronos_mcp.exceptions import AccountConnectionError
+
+        mock_account_manager.get_principal.side_effect = AccountConnectionError("test_account")
+
+        mgr = CalendarManager(mock_account_manager)
+        with pytest.raises(AccountConnectionError):
+            mgr.get_calendar("test-calendar", "test_account")

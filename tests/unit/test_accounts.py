@@ -124,11 +124,13 @@ class TestAccountManager:
         """Test getting principal for an account"""
         mgr = AccountManager(mock_config_manager)
 
-        # No principal when not connected
-        principal = mgr.get_principal("nonexistent")
-        assert principal is None
+        # De-mask: a request for an account that isn't configured propagates an
+        # honest AccountNotFoundError from connect_account (it is NOT swallowed to
+        # None by safe_operation anymore).
+        with pytest.raises(AccountNotFoundError):
+            mgr.get_principal("nonexistent")
 
-        # Should return principal when connected
+        # Should return principal when already connected (cached)
         mock_principal = Mock()
         mgr.principals["test_account"] = mock_principal
         # Add timestamp to prevent stale connection check
@@ -136,6 +138,60 @@ class TestAccountManager:
 
         principal = mgr.get_principal("test_account")
         assert principal == mock_principal
+
+    def test_get_principal_no_alias_no_default_returns_none(self, mock_config_manager):
+        """get_principal returns None ONLY for the genuine no-alias/no-default case."""
+        mock_config_manager.config.default_account = None
+        mgr = AccountManager(mock_config_manager)
+
+        # No alias passed and no default account configured -> honest None.
+        assert mgr.get_principal() is None
+
+    def test_get_principal_connection_failure_propagates(
+        self, mock_config_manager, sample_account
+    ):
+        """De-mask PRIMARY fix: a connect timeout surfaces as AccountConnectionError.
+
+        Previously the @safe_operation(default_return=None) decorator swallowed the
+        timeout to None one layer below get_calendar, which then looked like a
+        CalendarNotFoundError. It must now propagate.
+        """
+        mock_config_manager.add_account(sample_account)
+        mgr = AccountManager(mock_config_manager)
+
+        # Simulate a cold-start connect timeout: DAVClient construction raises a
+        # transient (non-auth) error on every retry.
+        with patch("chronos_mcp.accounts.DAVClient") as mock_dav_client:
+            with patch("time.sleep"):  # don't actually back off
+                mock_dav_client.side_effect = TimeoutError("connection timed out")
+
+                with pytest.raises(AccountConnectionError) as exc_info:
+                    mgr.get_principal("test_account")
+
+        assert exc_info.value.details["alias"] == "test_account"
+        # The principal was NOT silently cached/None'd.
+        assert "test_account" not in mgr.principals
+
+    def test_get_connection_connection_failure_propagates(
+        self, mock_config_manager, sample_account
+    ):
+        """De-mask: get_connection also propagates the honest AccountConnectionError."""
+        mock_config_manager.add_account(sample_account)
+        mgr = AccountManager(mock_config_manager)
+
+        with patch("chronos_mcp.accounts.DAVClient") as mock_dav_client:
+            with patch("time.sleep"):
+                mock_dav_client.side_effect = TimeoutError("connection timed out")
+
+                with pytest.raises(AccountConnectionError):
+                    mgr.get_connection("test_account")
+
+    def test_get_connection_no_alias_no_default_returns_none(self, mock_config_manager):
+        """get_connection returns None ONLY for the genuine no-alias/no-default case."""
+        mock_config_manager.config.default_account = None
+        mgr = AccountManager(mock_config_manager)
+
+        assert mgr.get_connection() is None
 
     @patch("chronos_mcp.accounts.DAVClient")
     def test_get_connection_with_default(

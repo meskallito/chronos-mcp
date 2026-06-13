@@ -14,7 +14,6 @@ from .exceptions import (
     CalendarCreationError,
     CalendarDeletionError,
     CalendarNotFoundError,
-    ErrorHandler,
 )
 from .logging_config import setup_logging
 from .models import Calendar
@@ -41,29 +40,31 @@ class CalendarManager:
                 request_id=request_id,
             )
 
+        # De-masking note: the old `except Exception: return []` swallow around
+        # `principal.calendars()` turned a cold iCloud timeout into a misleading
+        # "0 calendars, no error". We now let connection/transient errors surface
+        # (get_principal already raises AccountConnectionError on a connect
+        # failure) so the tool layer returns a retryable error instead of an empty
+        # list. A genuinely empty account still returns [].
         calendars = []
-        try:
-            for cal in principal.calendars():
-                # Extract calendar properties
-                cal_info = Calendar(
-                    uid=(
-                        str(cal.url).split("/")[-2]
-                        if str(cal.url).endswith("/")
-                        else str(cal.url).split("/")[-1]
-                    ),
-                    name=cal.name or "Unnamed Calendar",
-                    description=None,  # Will need to fetch from properties
-                    color=None,  # Will need to fetch from properties
-                    account_alias=account_alias
-                    or self.accounts.config.config.default_account
-                    or "",
-                    url=str(cal.url),
-                    read_only=False,  # Will need to check permissions
-                )
-                calendars.append(cal_info)
-
-        except Exception as e:
-            logger.error(f"Error listing calendars: {e}")
+        for cal in principal.calendars():
+            # Extract calendar properties
+            cal_info = Calendar(
+                uid=(
+                    str(cal.url).split("/")[-2]
+                    if str(cal.url).endswith("/")
+                    else str(cal.url).split("/")[-1]
+                ),
+                name=cal.name or "Unnamed Calendar",
+                description=None,  # Will need to fetch from properties
+                color=None,  # Will need to fetch from properties
+                account_alias=account_alias
+                or self.accounts.config.config.default_account
+                or "",
+                url=str(cal.url),
+                read_only=False,  # Will need to check permissions
+            )
+            calendars.append(cal_info)
 
         return calendars
 
@@ -165,28 +166,38 @@ class CalendarManager:
             )
             raise CalendarDeletionError(calendar_uid, str(e), request_id=request_id)
 
-    @ErrorHandler.safe_operation(logger, default_return=None)
     def get_calendar(
         self,
         calendar_uid: str,
         account_alias: Optional[str] = None,
         request_id: Optional[str] = None,
     ) -> Optional[CalDAVCalendar]:
-        """Get CalDAV calendar object by UID - internal utility method"""
+        """Get CalDAV calendar object by UID - internal utility method
+
+        De-masking note: this method is intentionally NOT wrapped in
+        ``ErrorHandler.safe_operation(default_return=None)`` and no longer swallows
+        ``principal.calendars()`` failures to ``None``. A connection/cold-start
+        timeout now propagates (as ``AccountConnectionError`` from
+        ``get_principal``, or whatever ``principal.calendars()`` raises) so the
+        caller does NOT mistake a transient outage for a missing calendar.
+
+        ``None`` is returned ONLY for the genuine "iterated all calendars, no uid
+        match" case (so callers in events/tasks/journals keep raising an accurate
+        ``CalendarNotFoundError``). ``get_principal`` only returns ``None`` itself
+        when no alias and no default account are configured.
+        """
         principal = self.accounts.get_principal(account_alias)
         if not principal:
             return None
 
-        try:
-            for cal in principal.calendars():
-                cal_id = (
-                    str(cal.url).split("/")[-2]
-                    if str(cal.url).endswith("/")
-                    else str(cal.url).split("/")[-1]
-                )
-                if cal_id == calendar_uid:
-                    return cal
-        except Exception as e:
-            logger.error(f"Error getting calendar: {e}")
+        for cal in principal.calendars():
+            cal_id = (
+                str(cal.url).split("/")[-2]
+                if str(cal.url).endswith("/")
+                else str(cal.url).split("/")[-1]
+            )
+            if cal_id == calendar_uid:
+                return cal
 
+        # Genuine no-match: iterated every calendar, none had this uid.
         return None

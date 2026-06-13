@@ -19,7 +19,6 @@ from .exceptions import (
     AccountConnectionError,
     AccountNotFoundError,
     ChronosError,
-    ErrorHandler,
     ErrorSanitizer,
 )
 from .logging_config import setup_logging
@@ -311,12 +310,22 @@ class AccountManager:
         age_minutes = (time.time() - self._connection_timestamps[alias]) / 60
         return age_minutes > self._connection_ttl_minutes
 
-    @ErrorHandler.safe_operation(logger, default_return=None)
     def get_connection(self, alias: Optional[str] = None) -> Optional[DAVClient]:
         """Get connection for an account - internal utility method
 
         Thread-safe connection management with proper TOCTOU prevention.
         Staleness check MUST happen inside lock to prevent race conditions.
+
+        De-masking note: this method is intentionally NOT wrapped in
+        ``ErrorHandler.safe_operation(default_return=None)``. A slow iCloud
+        cold-start connect raises inside ``connect_account`` (timeout / transient
+        network error -> ``AccountConnectionError``); swallowing it to ``None``
+        here surfaced one layer up as a misleading ``CalendarNotFoundError``.
+        We now let ``connect_account``'s honest ``ChronosError`` (most often
+        ``AccountConnectionError``, also ``AccountNotFoundError`` /
+        ``AccountAuthenticationError``) propagate so the tool layer can return a
+        retryable error instead of pretending the calendar is missing. ``None`` is
+        returned ONLY for the genuine "no alias and no default account" case.
         """
         if not alias:
             alias = self.config.config.default_account
@@ -343,12 +352,18 @@ class AccountManager:
 
         return self.connections.get(alias)
 
-    @ErrorHandler.safe_operation(logger, default_return=None)
     def get_principal(self, alias: Optional[str] = None) -> Optional[Principal]:
         """Get principal for an account - internal utility method
 
         Thread-safe principal access with proper TOCTOU prevention.
         Staleness check MUST happen inside lock to prevent race conditions.
+
+        De-masking note: like ``get_connection``, this method is intentionally
+        NOT wrapped in ``ErrorHandler.safe_operation(default_return=None)``. The
+        cold-start iCloud timeout is lost HERE (one layer below ``get_calendar``)
+        when ``connect_account``'s ``AccountConnectionError`` is collapsed to
+        ``None``. We let that honest error propagate; ``None`` is returned ONLY for
+        the genuine "no alias and no default account" case.
         """
         if not alias:
             alias = self.config.config.default_account
