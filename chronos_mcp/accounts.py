@@ -170,6 +170,19 @@ class AccountManager:
         self._connection_timestamps: Dict[str, float] = {}
         self._connection_ttl_minutes: int = 30  # Connection TTL in minutes
 
+        # Idle-staleness guard (the iCloud idle-drop fix). iCloud silently drops
+        # idle keep-alive sockets after ~15-20 s; the python stack does NOT detect
+        # the dead socket and the next op hangs for the FULL read timeout before
+        # the reactive heal can even fire (measured: a ~30 s hang then recover).
+        # So we PROACTIVELY reconnect (cheap: ~0.4 s for a fresh DAVClient, ~ms for
+        # local Radicale) when the cached connection has been idle longer than this
+        # threshold — preempting the dead-socket hang entirely. Reactive heal stays
+        # as the safety net for an unexpected drop INSIDE the threshold. Tracked by
+        # last *activity* (not connect) time so an actively-used connection is never
+        # needlessly recycled. 0 disables the proactive guard.
+        self._idle_reconnect_seconds: float = 10.0
+        self._last_activity: Dict[str, float] = {}
+
         # Connection pool limits and health tracking
         self._max_connections_per_account: int = 3
         self._connection_timeout: int = 30  # Connection timeout in seconds
@@ -248,6 +261,9 @@ class AccountManager:
                 self.connections[alias] = client
                 self.principals[alias] = principal
                 self._connection_timestamps[alias] = time.time()
+                # Seed last-activity so a freshly-connected-but-then-idle socket is
+                # still caught by the proactive idle-staleness reconnect.
+                self._last_activity[alias] = time.time()
 
                 # Ensure lock exists for this connection
                 if alias not in self._connection_locks:
@@ -320,6 +336,8 @@ class AccountManager:
             del self.principals[alias]
         if alias in self._connection_timestamps:
             del self._connection_timestamps[alias]
+        if alias in self._last_activity:
+            del self._last_activity[alias]
         # Keep lock for reuse - don't delete self._connection_locks[alias]
         # Reusing locks avoids race where Thread A deletes lock while Thread B tries to acquire it
         # Note: Keep circuit breaker and health data for future connections
@@ -482,6 +500,22 @@ class AccountManager:
             raise AccountConnectionError(alias, request_id=request_id)
         return principal
 
+    def _is_connection_idle_stale(self, alias: str) -> bool:
+        """Has the cached connection been idle longer than the idle threshold?
+
+        Targets the iCloud idle-drop: a connection unused for more than
+        ``_idle_reconnect_seconds`` is assumed to have a dead socket and should be
+        proactively recycled (cheap) rather than hung on (the full read timeout).
+        Returns False when the guard is disabled (threshold <= 0) or the
+        connection was used recently.
+        """
+        if self._idle_reconnect_seconds <= 0:
+            return False
+        last = self._last_activity.get(alias)
+        if last is None:
+            return False
+        return (time.time() - last) > self._idle_reconnect_seconds
+
     def execute_with_reconnect(
         self,
         operation: Callable[[Principal], T],
@@ -500,26 +534,51 @@ class AccountManager:
         (~0.4 s for a fresh DAVClient), re-run ``operation`` with the FRESH
         principal exactly once, and return its result.
 
-        Why reactive-heal (approach A) rather than disabling keep-alive: the local
-        Radicale ``default`` account is fast and its keep-alive is fine — forcing a
-        fresh connection on every call would tax it needlessly. Reactive heal keeps
-        the warm-path cache (fast when fresh) and pays the ~0.4 s reconnect cost
-        ONLY when a socket has actually gone stale.
+        Combined strategy (approach A reactive-heal + approach c idle-TTL):
+          - PROACTIVE: if the cached connection has been idle past
+            ``_idle_reconnect_seconds`` we reconnect BEFORE running the op. This is
+            the primary iCloud fix — a dead idle socket otherwise hangs for the
+            full read timeout (~30 s) BEFORE the reactive heal can fire; preempting
+            it costs only ~0.4 s (a fresh DAVClient). For local Radicale the
+            reconnect is ~ms, so this does not meaningfully regress it.
+          - REACTIVE: if the op still raises a dead-socket error (an unexpected
+            drop INSIDE the idle window), we evict + reconnect + retry ONCE.
+          - WARM: a recently-used connection runs the op directly with no
+            reconnect (no perf regression).
 
-        Bounded to a single retry: a persistent failure re-raises honestly (an
-        ``AccountConnectionError`` from ``connect_account`` if the reconnect itself
-        fails, else the operation's own error) — never an infinite loop, never a
-        masked ``None``/empty result (preserves the de-mask invariant).
+        Why not disable keep-alive entirely: that would add ~0.4 s to EVERY call
+        including Radicale's fast local reads. The idle-TTL keeps the warm-path
+        cache fast and pays the reconnect only after an actual idle gap.
+
+        Bounded to a single reactive retry: a persistent failure re-raises honestly
+        (an ``AccountConnectionError`` from ``connect_account`` if the reconnect
+        itself fails, else the operation's own error) — never an infinite loop,
+        never a masked ``None``/empty result (preserves the de-mask invariant).
         """
         request_id = request_id or str(uuid.uuid4())
         alias = account_alias or self.config.config.default_account
+
+        # PROACTIVE idle-staleness reconnect (the iCloud idle-drop preempt).
+        if alias and alias in self.connections and self._is_connection_idle_stale(alias):
+            idle = time.time() - self._last_activity.get(alias, 0)
+            logger.info(
+                f"Connection for '{alias}' idle {idle:.0f}s (> "
+                f"{self._idle_reconnect_seconds:.0f}s) — proactively reconnecting "
+                f"to avoid a stale-socket hang",
+                extra={"request_id": request_id},
+            )
+            self._force_reconnect(alias, request_id=request_id)
+
         principal = self.get_principal(account_alias)
         if principal is None:
             # No alias and no default account — honest, non-retryable.
             raise AccountNotFoundError(alias or "default", request_id=request_id)
 
         try:
-            return operation(principal)
+            result = operation(principal)
+            if alias:
+                self._last_activity[alias] = time.time()
+            return result
         except Exception as exc:  # noqa: BLE001 - re-raised below if not healable
             if not (alias and _is_stale_connection_error(exc)):
                 raise
@@ -531,7 +590,9 @@ class AccountManager:
             # _force_reconnect raises AccountConnectionError if the reconnect fails;
             # that honest error propagates (we do NOT mask it).
             fresh_principal = self._force_reconnect(alias, request_id=request_id)
-            return operation(fresh_principal)
+            result = operation(fresh_principal)
+            self._last_activity[alias] = time.time()
+            return result
 
     def test_account(self, alias: str, request_id: Optional[str] = None) -> Dict[str, Any]:
         """Test account connectivity and return structured result"""

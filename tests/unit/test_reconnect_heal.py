@@ -199,6 +199,76 @@ class TestExecuteWithReconnect:
         assert mock_dav_client.call_count == 1
 
 
+class TestProactiveIdleReconnect:
+    """The primary iCloud fix: proactively reconnect after an idle gap so a dead
+    socket never gets hit (which would hang for the full read timeout)."""
+
+    @patch("chronos_mcp.accounts.DAVClient")
+    def test_idle_beyond_threshold_reconnects_before_op(
+        self, mock_dav_client, mock_config_manager, icloud_account
+    ):
+        mock_config_manager.add_account(icloud_account)
+        mgr = AccountManager(mock_config_manager)
+        mgr._idle_reconnect_seconds = 10.0
+
+        client1, principal1 = Mock(), Mock(name="p1")
+        client2, principal2 = Mock(), Mock(name="p2")
+        client1.principal.return_value = principal1
+        client2.principal.return_value = principal2
+        mock_dav_client.side_effect = [client1, client2]
+
+        mgr.connect_account("icloud")  # warm
+        # Simulate the connection having been idle for 30s.
+        mgr._last_activity["icloud"] = mgr._last_activity["icloud"] - 30
+
+        op = Mock(return_value=["ok"])
+        result = mgr.execute_with_reconnect(op, account_alias="icloud")
+
+        assert result == ["ok"]
+        # Reconnected proactively (fresh client built) and ran op on the fresh principal.
+        assert mock_dav_client.call_count == 2
+        op.assert_called_once_with(principal2)
+
+    @patch("chronos_mcp.accounts.DAVClient")
+    def test_recent_activity_does_not_reconnect(
+        self, mock_dav_client, mock_config_manager, icloud_account
+    ):
+        mock_config_manager.add_account(icloud_account)
+        mgr = AccountManager(mock_config_manager)
+        mgr._idle_reconnect_seconds = 10.0
+
+        client, principal = Mock(), Mock()
+        client.principal.return_value = principal
+        mock_dav_client.return_value = client
+
+        mgr.connect_account("icloud")  # last_activity = now (recent)
+        op = Mock(return_value=["ok"])
+        mgr.execute_with_reconnect(op, account_alias="icloud")
+
+        # Within the idle window -> no proactive reconnect.
+        assert mock_dav_client.call_count == 1
+        op.assert_called_once_with(principal)
+
+    @patch("chronos_mcp.accounts.DAVClient")
+    def test_idle_guard_disabled_when_zero(
+        self, mock_dav_client, mock_config_manager, icloud_account
+    ):
+        mock_config_manager.add_account(icloud_account)
+        mgr = AccountManager(mock_config_manager)
+        mgr._idle_reconnect_seconds = 0  # disabled
+
+        client, principal = Mock(), Mock()
+        client.principal.return_value = principal
+        mock_dav_client.return_value = client
+
+        mgr.connect_account("icloud")
+        mgr._last_activity["icloud"] = mgr._last_activity["icloud"] - 999
+        op = Mock(return_value=["ok"])
+        mgr.execute_with_reconnect(op, account_alias="icloud")
+        # Disabled -> no proactive reconnect even though idle.
+        assert mock_dav_client.call_count == 1
+
+
 class TestManagerIntegration:
     @patch("chronos_mcp.accounts.DAVClient")
     def test_get_events_range_heals_stale_date_search(
