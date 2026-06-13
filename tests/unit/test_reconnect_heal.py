@@ -461,6 +461,62 @@ class TestManagerIntegration:
         assert mock_dav_client.call_count == 2
 
     @patch("chronos_mcp.accounts.DAVClient")
+    def test_get_calendar_surfaces_missing_explicit_account(
+        self, mock_dav_client, mock_config_manager, icloud_account
+    ):
+        """get_calendar de-mask: an EXPLICITLY-named account that isn't in config must
+        surface AccountNotFoundError, NOT be swallowed to None (which the caller would
+        mistranslate into a missing-calendar error)."""
+        mock_config_manager.add_account(icloud_account)
+        accounts = AccountManager(mock_config_manager)
+        cal_mgr = CalendarManager(accounts)
+
+        # "nope" is not a configured account -> connect_account raises
+        # AccountNotFoundError -> must propagate, not return None.
+        with pytest.raises(AccountNotFoundError):
+            cal_mgr.get_calendar("any-uid", account_alias="nope")
+
+    def test_get_calendar_no_alias_no_default_returns_none(self, mock_config_manager):
+        """get_calendar: the genuine 'no alias AND no default account' case keeps the
+        historic None contract (so the caller raises an accurate CalendarNotFoundError)."""
+        accounts = AccountManager(mock_config_manager)  # no accounts, no default
+        cal_mgr = CalendarManager(accounts)
+        assert cal_mgr.get_calendar("any-uid", account_alias=None) is None
+
+    @patch("chronos_mcp.accounts.DAVClient")
+    def test_record_activity_identity_guard_does_not_stamp_replaced_principal(
+        self, mock_dav_client, mock_config_manager, icloud_account
+    ):
+        """A slow op finishing AFTER a concurrent reconnect must NOT stamp the
+        REPLACEMENT connection as freshly-used (which would suppress the next
+        proactive idle reconnect)."""
+        mock_config_manager.add_account(icloud_account)
+        mgr = AccountManager(mock_config_manager)
+
+        old_client, old_principal = Mock(), Mock(name="old_principal")
+        new_client, new_principal = Mock(), Mock(name="new_principal")
+        old_client.principal.return_value = old_principal
+        new_client.principal.return_value = new_principal
+        mock_dav_client.side_effect = [old_client, new_client]
+
+        mgr.connect_account("icloud")  # caches old_principal, seeds activity
+        # Simulate a concurrent reconnect replacing the cached principal.
+        mgr.connect_account("icloud")
+        assert mgr.principals["icloud"] is new_principal
+        new_stamp = mgr._last_activity["icloud"]
+
+        # An old/slow op finishing against old_principal must NOT overwrite the
+        # fresher stamp belonging to new_principal.
+        mgr._last_activity["icloud"] = new_stamp - 100  # pretend it went idle
+        before = mgr._last_activity["icloud"]
+        mgr._record_activity("icloud", old_principal)
+        assert mgr._last_activity["icloud"] == before  # unchanged (identity mismatch)
+
+        # Stamping for the CURRENT cached principal still works.
+        mgr._record_activity("icloud", new_principal)
+        assert mgr._last_activity["icloud"] > before
+
+    @patch("chronos_mcp.accounts.DAVClient")
     def test_radicale_warm_path_unaffected(
         self, mock_dav_client, mock_config_manager, radicale_account
     ):

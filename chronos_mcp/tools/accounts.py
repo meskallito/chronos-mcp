@@ -94,7 +94,9 @@ async def remove_account(
     if not _managers["config_manager"].get_account(alias):
         raise AccountNotFoundError(alias, request_id=request_id)
 
-    _managers["account_manager"].disconnect_account(alias)
+    # Use the lock-acquiring variant: disconnect_account is lock-free and must be
+    # serialized w.r.t. request-thread reconnect / idle-heal paths.
+    _managers["account_manager"].disconnect_account_locked(alias)
     _managers["config_manager"].remove_account(alias)
 
     return create_success_response(

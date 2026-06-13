@@ -265,9 +265,9 @@ class AccountManager:
                 # still caught by the proactive idle-staleness reconnect.
                 self._last_activity[alias] = time.time()
 
-                # Ensure lock exists for this connection
-                if alias not in self._connection_locks:
-                    self._connection_locks[alias] = threading.Lock()
+                # Ensure lock exists for this connection (atomic setdefault so
+                # concurrent first-use threads converge on ONE lock per alias).
+                self._lock_for(alias)
 
                 # Record success
                 circuit_breaker.record_success()
@@ -348,6 +348,20 @@ class AccountManager:
 
         logger.debug(f"Disconnected and cleaned up resources for account '{alias}'")
 
+    def disconnect_account_locked(self, alias: str):
+        """Thread-safe public disconnect: acquire the per-alias lock, then evict.
+
+        ``disconnect_account`` itself is lock-FREE (its docstring requires the
+        caller to hold ``self._connection_locks[alias]``). PUBLIC entrypoints such
+        as the ``remove_account`` MCP tool would otherwise mutate
+        ``self.connections`` / ``self.principals`` concurrently with a request
+        thread's reconnect / idle-heal path. Route them through here so the evict
+        is serialized. Non-reentrant lock: ``disconnect_account`` does not
+        re-acquire it, so there is no self-deadlock.
+        """
+        with self._lock_for(alias):
+            self.disconnect_account(alias)
+
     def _cleanup_stale_connection(self, alias: str):
         """Clean up a specific stale connection"""
         if alias in self._connection_timestamps:
@@ -422,11 +436,10 @@ class AccountManager:
         if not alias:
             return None
 
-        # Ensure lock exists before checking staleness
-        if alias not in self._connection_locks:
-            self._connection_locks[alias] = threading.Lock()
-
-        with self._connection_locks[alias]:
+        # Acquire the per-alias lock via the atomic setdefault helper so two
+        # concurrent first-use threads can't install (and serialize on) DIFFERENT
+        # locks for the same alias — the check-then-assign here was a TOCTOU.
+        with self._lock_for(alias):
             # Check staleness INSIDE lock to prevent TOCTOU race
             # Race scenario without this: Thread A checks stale=True outside lock,
             # Thread B connects, Thread A disconnects fresh connection
@@ -460,11 +473,9 @@ class AccountManager:
         if not alias:
             return None
 
-        # Ensure lock exists before checking staleness
-        if alias not in self._connection_locks:
-            self._connection_locks[alias] = threading.Lock()
-
-        with self._connection_locks[alias]:
+        # Acquire the per-alias lock via the atomic setdefault helper (same
+        # TOCTOU fix as get_connection — converge on ONE lock per alias).
+        with self._lock_for(alias):
             # Check staleness INSIDE lock to prevent TOCTOU race
             # Same pattern as get_connection() for consistency
             if alias not in self.principals or self._is_connection_stale(alias):
@@ -604,7 +615,7 @@ class AccountManager:
 
         try:
             result = operation(principal)
-            self._record_activity(alias)
+            self._record_activity(alias, principal)
             return result
         except Exception as exc:  # noqa: BLE001 - re-raised below if not healable
             if not (alias and _is_stale_connection_error(exc)):
@@ -618,18 +629,32 @@ class AccountManager:
             # that honest error propagates (we do NOT mask it).
             fresh_principal = self._force_reconnect(alias, request_id=request_id)
             result = operation(fresh_principal)
-            self._record_activity(alias)
+            self._record_activity(alias, fresh_principal)
             return result
 
-    def _record_activity(self, alias: Optional[str]) -> None:
+    def _record_activity(self, alias: Optional[str], principal: Optional[Principal] = None) -> None:
         """Stamp the last-activity time for ``alias`` under the per-alias lock.
 
         Serialized w.r.t. disconnect_account (which del's _last_activity[alias])
         and the proactive idle check so a stamp can't interleave with an evict.
+
+        Identity guard: a SLOW op can finish AFTER a concurrent reconnect has
+        already evicted+replaced the cached principal. Stamping unconditionally
+        would mark the REPLACEMENT connection as freshly-used and suppress the
+        next proactive idle reconnect (the iCloud idle-drop preempt). So we only
+        stamp when the principal the op actually ran against is STILL the cached
+        one (identity check under the lock). If it was replaced, the new
+        connection already seeded its own ``_last_activity`` at connect time, so
+        we leave that fresher stamp intact. (Passing ``principal=None`` stamps
+        unconditionally — preserved for any non-op caller.)
         """
         if not alias:
             return
         with self._lock_for(alias):
+            if principal is not None and self.principals.get(alias) is not principal:
+                # The connection was reconnected out from under this op; don't
+                # stamp the replacement as if THIS (old) op used it.
+                return
             self._last_activity[alias] = time.time()
 
     def test_account(self, alias: str, request_id: Optional[str] = None) -> Dict[str, Any]:
@@ -639,12 +664,19 @@ class AccountManager:
         request_id = request_id or str(uuid.uuid4())
 
         try:
-            if self.connect_account(alias, request_id=request_id):
-                principal = self.principals.get(alias)
-                if principal:
-                    calendars = principal.calendars()
-                    result["connected"] = True
-                    result["calendars"] = len(calendars)
+            # Hold the per-alias lock so this PUBLIC entrypoint's connect + the
+            # subsequent principal read are serialized w.r.t. the request-thread
+            # reconnect / idle-heal paths (which mutate self.connections /
+            # self.principals under the same lock). The lock is non-reentrant, but
+            # connect_account only calls the lock-FREE _lock_for() (setdefault, no
+            # acquire), so there is no self-deadlock.
+            with self._lock_for(alias):
+                if self.connect_account(alias, request_id=request_id):
+                    principal = self.principals.get(alias)
+                    if principal:
+                        calendars = principal.calendars()
+                        result["connected"] = True
+                        result["calendars"] = len(calendars)
         except ChronosError as e:
             # Use sanitized error message for user response
             result["error"] = ErrorSanitizer.get_user_friendly_message(e)

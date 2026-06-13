@@ -226,6 +226,15 @@ class CalendarManager:
                 request_id=request_id,
             )
         except AccountNotFoundError:
-            # Genuine "no alias and no default account" — preserve the historic
-            # None contract so callers raise an accurate CalendarNotFoundError.
-            return None
+            # Distinguish the two AccountNotFoundError sources:
+            #   1. Genuine "no alias AND no default account configured" — there is
+            #      no account to resolve, so preserve the historic None contract
+            #      (callers raise an accurate CalendarNotFoundError).
+            #   2. An EXPLICITLY-named (or default) account that simply isn't in
+            #      config — that is an honest config error and must surface, NOT
+            #      be masked as a missing calendar. (This is the de-mask intent;
+            #      AccountConnectionError already propagates untouched.)
+            resolved_alias = account_alias or self.accounts.config.config.default_account
+            if not resolved_alias:
+                return None
+            raise

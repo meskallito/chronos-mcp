@@ -284,15 +284,30 @@ class TestCalendarManager:
 
         assert "CalDAV error" in str(exc_info.value)
 
-    def test_get_calendar_no_principal(self, mock_account_manager):
-        """Test getting calendar when no principal found"""
+    def test_get_calendar_no_principal_named_account_surfaces_error(self, mock_account_manager):
+        """De-mask: a NAMED account that can't resolve a principal (missing/misconfigured)
+        must surface AccountNotFoundError, NOT be masked to None (which the caller would
+        mistranslate into a missing-calendar error)."""
         mock_account_manager.get_principal.return_value = None
 
         mgr = CalendarManager(mock_account_manager)
-        result = mgr.get_calendar("cal-123", "test_account")
+
+        from chronos_mcp.exceptions import AccountNotFoundError
+
+        with pytest.raises(AccountNotFoundError):
+            mgr.get_calendar("cal-123", "test_account")
+        mock_account_manager.get_principal.assert_called_once_with("test_account")
+
+    def test_get_calendar_no_alias_no_default_returns_none(self, mock_account_manager):
+        """The genuine 'no alias AND no default account' case keeps the historic None
+        contract (so the caller raises an accurate CalendarNotFoundError)."""
+        mock_account_manager.get_principal.return_value = None
+        mock_account_manager.config.config.default_account = None
+
+        mgr = CalendarManager(mock_account_manager)
+        result = mgr.get_calendar("cal-123", account_alias=None)
 
         assert result is None
-        mock_account_manager.get_principal.assert_called_once_with("test_account")
 
     def test_get_calendar_success(self, mock_account_manager, mock_principal, mock_calendar):
         """Test successful calendar retrieval"""
