@@ -11,16 +11,57 @@ operation against the fresh principal.
 These tests use mocks only (no network).
 """
 
+import types
 from unittest.mock import Mock, patch
 
 import pytest
-import requests
 
 from chronos_mcp.accounts import AccountManager, _is_stale_connection_error
 from chronos_mcp.calendars import CalendarManager
 from chronos_mcp.events import EventManager
 from chronos_mcp.exceptions import AccountConnectionError, AccountNotFoundError
 from chronos_mcp.models import Account
+
+# ---------------------------------------------------------------------------
+# Synthetic HTTP-backend exceptions (NO `import requests`).
+#
+# The fork's prod image runs caldav>=3 on **niquests** (NOT requests); a hard
+# `import requests` here would (a) be an undeclared test dependency that only
+# passes by transitive luck, and (b) — worse — exercise the requests-class path
+# while the prod-critical classification is the backend-AGNOSTIC name heuristic
+# in `_is_stale_connection_error` (module name ends in "exceptions" + the class
+# name mentions Timeout/ConnectionError), the ONLY thing that classifies a
+# niquests error when niquests can't be imported. A hard `import requests`
+# crash-looped the first prod deploy precisely because prod lacked requests.
+#
+# So we synthesize backend-shaped exceptions from scratch in a module named
+# "<backend>.exceptions" with Timeout/ConnectionError-shaped names. These do NOT
+# inherit from builtin ConnectionError/socket.timeout, so they can ONLY match via
+# the name heuristic — exactly the prod path. We also keep builtin-based cases for
+# the class-match branch.
+# ---------------------------------------------------------------------------
+_niquests_exc_mod = types.ModuleType("niquests.exceptions")
+
+
+def _make_backend_exc(class_name: str) -> type:
+    """A niquests-shaped exception: lives in a '*.exceptions' module, the given
+    name (e.g. 'ReadTimeout'), and does NOT subclass any builtin socket error —
+    so it is classifiable ONLY by the backend-agnostic name heuristic."""
+    cls = type(class_name, (Exception,), {})
+    cls.__module__ = "niquests.exceptions"
+    setattr(_niquests_exc_mod, class_name, cls)
+    return cls
+
+
+# niquests-shaped classes (heuristic-only path — the prod classification).
+NiquestsReadTimeout = _make_backend_exc("ReadTimeout")
+NiquestsConnectionError = _make_backend_exc("ConnectionError")
+NiquestsChunkedEncodingError = _make_backend_exc("ChunkedEncodingError")
+
+
+def _stale_exc(msg: str = "read timed out") -> Exception:
+    """A representative dead-socket error as it surfaces in prod (niquests-shaped)."""
+    return NiquestsReadTimeout(msg)
 
 
 @pytest.fixture
@@ -46,24 +87,55 @@ def radicale_account():
 
 
 class TestStaleErrorClassifier:
-    def test_requests_timeout_is_stale(self):
-        assert _is_stale_connection_error(requests.exceptions.ReadTimeout("read timed out"))
+    # --- class-match branch (builtins; always present, no backend needed) ---
+    def test_builtin_connection_error_is_stale(self):
+        # builtin ConnectionError (and subclasses BrokenPipe/ConnectionReset) is in
+        # _STALE_TYPES — the real dead-socket case.
+        assert _is_stale_connection_error(ConnectionResetError("connection reset by peer"))
 
-    def test_requests_connection_error_is_stale(self):
-        assert _is_stale_connection_error(requests.exceptions.ConnectionError("conn reset"))
+    def test_socket_timeout_is_stale(self):
+        import socket
+
+        assert _is_stale_connection_error(socket.timeout("timed out"))
+
+    # --- name-heuristic branch (the PROD path: niquests, not importable here) ---
+    def test_niquests_read_timeout_is_stale_via_name_heuristic(self):
+        # The prod-critical path: a niquests Timeout error (caldav>=3 backend) that
+        # does NOT subclass any builtin socket error is still classified stale by the
+        # module(".exceptions")+name heuristic. This is the branch that exists because
+        # a hard `import requests` crash-looped the first deploy; it must stay covered.
+        exc = NiquestsReadTimeout("read timed out")
+        assert not isinstance(exc, (ConnectionError,))  # proves it's heuristic-only
+        assert _is_stale_connection_error(exc)
+
+    def test_niquests_connection_error_is_stale_via_name_heuristic(self):
+        assert _is_stale_connection_error(NiquestsConnectionError("conn reset"))
+
+    def test_niquests_chunked_encoding_error_is_stale_via_name_heuristic(self):
+        assert _is_stale_connection_error(NiquestsChunkedEncodingError("incomplete read"))
 
     def test_wrapped_in_cause_chain_is_stale(self):
-        inner = requests.exceptions.ReadTimeout("read timed out")
+        # caldav wraps the transport error inside its own DAVError; walk the chain.
+        inner = NiquestsReadTimeout("read timed out")
         outer = RuntimeError("caldav wrapper")
         outer.__cause__ = inner
         assert _is_stale_connection_error(outer)
 
+    # --- negatives: real errors must NOT be misclassified as stale ---
     def test_value_error_is_not_stale(self):
         assert not _is_stale_connection_error(ValueError("not found"))
 
     def test_auth_error_is_not_stale(self):
         # Auth/HTTP-status problems are real, must NOT trigger a reconnect+retry.
         assert not _is_stale_connection_error(PermissionError("403"))
+
+    def test_niquests_auth_error_is_not_misclassified(self):
+        # A niquests/caldav auth-shaped error (no Timeout/ConnectionError in the name)
+        # must NOT be classified as a stale socket — else a real 401/403 would trigger
+        # an endless evict+reconnect+retry instead of surfacing honestly.
+        auth_exc = type("AuthorizationError", (Exception,), {})
+        auth_exc.__module__ = "niquests.exceptions"
+        assert not _is_stale_connection_error(auth_exc("401 Unauthorized"))
 
 
 class TestExecuteWithReconnect:
@@ -114,7 +186,7 @@ class TestExecuteWithReconnect:
         # Operation fails on the stale principal, succeeds on the fresh one.
         def op(principal):
             if principal is stale_principal:
-                raise requests.exceptions.ReadTimeout("HTTPSConnectionPool: read timed out")
+                raise _stale_exc("HTTPSConnectionPool: read timed out")
             return ["fresh-result"]
 
         result = mgr.execute_with_reconnect(op, account_alias="icloud")
@@ -140,12 +212,12 @@ class TestExecuteWithReconnect:
 
         def op(principal):
             call_count["n"] += 1
-            raise requests.exceptions.ConnectionError("connection reset by peer")
+            raise NiquestsConnectionError("connection reset by peer")
 
         # The reconnect itself succeeds, but the retried op fails again -> the
         # operation's own error propagates (NOT masked None/[]). Bounded: op runs
         # at most twice (initial + one retry).
-        with pytest.raises(requests.exceptions.ConnectionError):
+        with pytest.raises(NiquestsConnectionError):
             mgr.execute_with_reconnect(op, account_alias="icloud")
         assert call_count["n"] == 2  # initial + exactly one retry (no infinite loop)
 
@@ -160,15 +232,15 @@ class TestExecuteWithReconnect:
         # First construct succeeds (warm), reconnect attempts all fail.
         mock_dav_client.side_effect = [
             good_client,
-            requests.exceptions.ConnectionError("down"),
-            requests.exceptions.ConnectionError("down"),
-            requests.exceptions.ConnectionError("down"),
+            NiquestsConnectionError("down"),
+            NiquestsConnectionError("down"),
+            NiquestsConnectionError("down"),
         ]
         mgr.connect_account("icloud")
         mgr._base_retry_delay = 0  # don't sleep in test
 
         def op(principal):
-            raise requests.exceptions.ReadTimeout("read timed out")
+            raise _stale_exc("read timed out")
 
         with pytest.raises(AccountConnectionError):
             mgr.execute_with_reconnect(op, account_alias="icloud")
@@ -230,6 +302,40 @@ class TestProactiveIdleReconnect:
         op.assert_called_once_with(principal2)
 
     @patch("chronos_mcp.accounts.DAVClient")
+    def test_proactive_idle_reconnect_is_serialized_under_the_per_alias_lock(
+        self, mock_dav_client, mock_config_manager, icloud_account
+    ):
+        """Regression guard: the idle check + reconnect AND the last-activity stamp run
+        under self._connection_locks[alias] — the same lock _force_reconnect/get_principal
+        use — so two concurrent requests can't both fire a redundant reconnect, and a
+        disconnect can't interleave between the check and the reconnect. We assert the
+        proactive path holds the lock for the reconnect (the lock-free core
+        _force_reconnect_locked is invoked WHILE the lock is held)."""
+        mock_config_manager.add_account(icloud_account)
+        mgr = AccountManager(mock_config_manager)
+        mgr._idle_reconnect_seconds = 10.0
+
+        client1, client2 = Mock(), Mock()
+        client1.principal.return_value = Mock(name="p1")
+        client2.principal.return_value = Mock(name="p2")
+        mock_dav_client.side_effect = [client1, client2]
+        mgr.connect_account("icloud")
+        mgr._last_activity["icloud"] = mgr._last_activity["icloud"] - 30  # idle
+
+        lock = mgr._lock_for("icloud")
+        held_during_reconnect = {"v": False}
+        real_core = mgr._force_reconnect_locked
+
+        def spy(alias, request_id=None):
+            held_during_reconnect["v"] = lock.locked()
+            return real_core(alias, request_id=request_id)
+
+        with patch.object(mgr, "_force_reconnect_locked", side_effect=spy):
+            mgr.execute_with_reconnect(Mock(return_value=["ok"]), account_alias="icloud")
+
+        assert held_during_reconnect["v"], "proactive reconnect must run holding the per-alias lock"
+
+    @patch("chronos_mcp.accounts.DAVClient")
     def test_recent_activity_does_not_reconnect(
         self, mock_dav_client, mock_config_manager, icloud_account
     ):
@@ -285,7 +391,7 @@ class TestManagerIntegration:
             cal = Mock()
             cal.url = "https://caldav.icloud.com/123/calendars/fam-uid/"
             if stale:
-                cal.date_search.side_effect = requests.exceptions.ReadTimeout("read timed out")
+                cal.date_search.side_effect = _stale_exc("read timed out")
             else:
                 event = Mock()
                 event.data = (
@@ -333,7 +439,7 @@ class TestManagerIntegration:
         accounts = AccountManager(mock_config_manager)
 
         stale_principal = Mock()
-        stale_principal.calendars.side_effect = requests.exceptions.ReadTimeout("timed out")
+        stale_principal.calendars.side_effect = _stale_exc("timed out")
         fresh_cal = Mock()
         fresh_cal.url = "https://caldav.icloud.com/123/calendars/work/"
         fresh_cal.name = "Work"

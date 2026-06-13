@@ -478,6 +478,37 @@ class AccountManager:
 
         return self.principals.get(alias)
 
+    def _lock_for(self, alias: str) -> threading.Lock:
+        """Return (creating if needed) the per-alias connection lock.
+
+        NB: this creation is itself a tiny check-then-act, but the locks dict is
+        only ever grown (never pruned — see ``disconnect_account``), so the worst
+        case is two threads briefly racing to install a lock and one winning; the
+        loser's lock is discarded before use. Mirrors the existing inline
+        ``if alias not in self._connection_locks`` guards this consolidates.
+        """
+        return self._connection_locks.setdefault(alias, threading.Lock())
+
+    def _force_reconnect_locked(self, alias: str, request_id: Optional[str] = None) -> Principal:
+        """Evict the cached (stale) connection and reconnect — caller HOLDS the lock.
+
+        Lock-free core of ``_force_reconnect``. MUST be called while holding
+        ``self._connection_locks[alias]`` (the per-alias lock is NOT reentrant, so
+        a caller that already holds it — e.g. the proactive idle path in
+        ``execute_with_reconnect`` — calls this directly to avoid self-deadlock).
+        """
+        if alias in self.connections or alias in self.principals:
+            logger.info(
+                f"Evicting stale cached connection for '{alias}' and reconnecting",
+                extra={"request_id": request_id},
+            )
+            self.disconnect_account(alias)
+        self.connect_account(alias, request_id=request_id)
+        principal = self.principals.get(alias)
+        if principal is None:  # pragma: no cover - connect_account raises on failure
+            raise AccountConnectionError(alias, request_id=request_id)
+        return principal
+
     def _force_reconnect(self, alias: str, request_id: Optional[str] = None) -> Principal:
         """Evict the cached (stale) connection for ``alias`` and reconnect.
 
@@ -485,20 +516,8 @@ class AccountManager:
         reconnect is atomic w.r.t. ``get_connection``/``get_principal``. Returns
         the freshly-connected principal.
         """
-        if alias not in self._connection_locks:
-            self._connection_locks[alias] = threading.Lock()
-        with self._connection_locks[alias]:
-            if alias in self.connections or alias in self.principals:
-                logger.info(
-                    f"Evicting stale cached connection for '{alias}' and reconnecting",
-                    extra={"request_id": request_id},
-                )
-                self.disconnect_account(alias)
-            self.connect_account(alias, request_id=request_id)
-        principal = self.principals.get(alias)
-        if principal is None:  # pragma: no cover - connect_account raises on failure
-            raise AccountConnectionError(alias, request_id=request_id)
-        return principal
+        with self._lock_for(alias):
+            return self._force_reconnect_locked(alias, request_id=request_id)
 
     def _is_connection_idle_stale(self, alias: str) -> bool:
         """Has the cached connection been idle longer than the idle threshold?
@@ -559,15 +578,24 @@ class AccountManager:
         alias = account_alias or self.config.config.default_account
 
         # PROACTIVE idle-staleness reconnect (the iCloud idle-drop preempt).
-        if alias and alias in self.connections and self._is_connection_idle_stale(alias):
-            idle = time.time() - self._last_activity.get(alias, 0)
-            logger.info(
-                f"Connection for '{alias}' idle {idle:.0f}s (> "
-                f"{self._idle_reconnect_seconds:.0f}s) — proactively reconnecting "
-                f"to avoid a stale-socket hang",
-                extra={"request_id": request_id},
-            )
-            self._force_reconnect(alias, request_id=request_id)
+        # Thread-safety: the idle check (reads self.connections + self._last_activity)
+        # AND the reconnect MUST be atomic under the per-alias lock — otherwise two
+        # concurrent requests can each observe "idle" and fire a redundant reconnect,
+        # or a disconnect_account() (which del's _last_activity[alias]) can interleave
+        # between the check and the reconnect. We hold the SAME lock get_principal /
+        # _force_reconnect use; because that lock is non-reentrant we call the lock-free
+        # cores (_is_connection_idle_stale reads only; _force_reconnect_locked) here.
+        if alias:
+            with self._lock_for(alias):
+                if alias in self.connections and self._is_connection_idle_stale(alias):
+                    idle = time.time() - self._last_activity.get(alias, 0)
+                    logger.info(
+                        f"Connection for '{alias}' idle {idle:.0f}s (> "
+                        f"{self._idle_reconnect_seconds:.0f}s) — proactively reconnecting "
+                        f"to avoid a stale-socket hang",
+                        extra={"request_id": request_id},
+                    )
+                    self._force_reconnect_locked(alias, request_id=request_id)
 
         principal = self.get_principal(account_alias)
         if principal is None:
@@ -576,8 +604,7 @@ class AccountManager:
 
         try:
             result = operation(principal)
-            if alias:
-                self._last_activity[alias] = time.time()
+            self._record_activity(alias)
             return result
         except Exception as exc:  # noqa: BLE001 - re-raised below if not healable
             if not (alias and _is_stale_connection_error(exc)):
@@ -591,8 +618,19 @@ class AccountManager:
             # that honest error propagates (we do NOT mask it).
             fresh_principal = self._force_reconnect(alias, request_id=request_id)
             result = operation(fresh_principal)
-            self._last_activity[alias] = time.time()
+            self._record_activity(alias)
             return result
+
+    def _record_activity(self, alias: Optional[str]) -> None:
+        """Stamp the last-activity time for ``alias`` under the per-alias lock.
+
+        Serialized w.r.t. disconnect_account (which del's _last_activity[alias])
+        and the proactive idle check so a stamp can't interleave with an evict.
+        """
+        if not alias:
+            return
+        with self._lock_for(alias):
+            self._last_activity[alias] = time.time()
 
     def test_account(self, alias: str, request_id: Optional[str] = None) -> Dict[str, Any]:
         """Test account connectivity and return structured result"""
