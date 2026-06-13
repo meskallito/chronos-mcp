@@ -33,21 +33,24 @@ class CalendarManager:
         """List all calendars for an account - raises exceptions on failure"""
         request_id = request_id or str(uuid.uuid4())
 
-        principal = self.accounts.get_principal(account_alias)
-        if not principal:
-            raise AccountNotFoundError(
-                account_alias or self.accounts.config.config.default_account or "default",
-                request_id=request_id,
-            )
-
         # De-masking note: the old `except Exception: return []` swallow around
         # `principal.calendars()` turned a cold iCloud timeout into a misleading
         # "0 calendars, no error". We now let connection/transient errors surface
         # (get_principal already raises AccountConnectionError on a connect
         # failure) so the tool layer returns a retryable error instead of an empty
         # list. A genuinely empty account still returns [].
+        #
+        # Stale-connection heal: `principal.calendars()` is the exact op that hangs
+        # for iCloud after an idle gap. execute_with_reconnect evicts+reconnects+
+        # retries it once on a dead-socket error (warm path = no reconnect).
+        raw_calendars = self.accounts.execute_with_reconnect(
+            lambda principal: principal.calendars(),
+            account_alias=account_alias,
+            request_id=request_id,
+        )
+
         calendars = []
-        for cal in principal.calendars():
+        for cal in raw_calendars:
             # Extract calendar properties
             cal_info = Calendar(
                 uid=(
@@ -166,6 +169,29 @@ class CalendarManager:
             )
             raise CalendarDeletionError(calendar_uid, str(e), request_id=request_id)
 
+    @staticmethod
+    def find_calendar_in_principal(
+        principal, calendar_uid: str
+    ) -> Optional[CalDAVCalendar]:
+        """Resolve a CalDAV calendar object by UID from a given principal.
+
+        Pure lookup (does the ``principal.calendars()`` round-trip). Exposed so
+        callers in events/tasks/journals can resolve the calendar AND run their
+        data op inside a single ``execute_with_reconnect`` closure — meaning a
+        stale socket that surfaces on the data op (not just on the lookup) also
+        heals against the freshly-reconnected principal. Returns ``None`` on a
+        genuine no-uid-match.
+        """
+        for cal in principal.calendars():
+            cal_id = (
+                str(cal.url).split("/")[-2]
+                if str(cal.url).endswith("/")
+                else str(cal.url).split("/")[-1]
+            )
+            if cal_id == calendar_uid:
+                return cal
+        return None
+
     def get_calendar(
         self,
         calendar_uid: str,
@@ -185,19 +211,21 @@ class CalendarManager:
         match" case (so callers in events/tasks/journals keep raising an accurate
         ``CalendarNotFoundError``). ``get_principal`` only returns ``None`` itself
         when no alias and no default account are configured.
+
+        Stale-connection heal: the ``principal.calendars()`` lookup is the op that
+        hangs for iCloud after an idle gap, so it runs through
+        ``execute_with_reconnect`` (evict+reconnect+retry once on a dead-socket
+        error; warm path does NOT reconnect). The returned CalDAV calendar object
+        is bound to the now-fresh client, so the caller's subsequent data op uses
+        a live socket.
         """
-        principal = self.accounts.get_principal(account_alias)
-        if not principal:
-            return None
-
-        for cal in principal.calendars():
-            cal_id = (
-                str(cal.url).split("/")[-2]
-                if str(cal.url).endswith("/")
-                else str(cal.url).split("/")[-1]
+        try:
+            return self.accounts.execute_with_reconnect(
+                lambda principal: self.find_calendar_in_principal(principal, calendar_uid),
+                account_alias=account_alias,
+                request_id=request_id,
             )
-            if cal_id == calendar_uid:
-                return cal
-
-        # Genuine no-match: iterated every calendar, none had this uid.
-        return None
+        except AccountNotFoundError:
+            # Genuine "no alias and no default account" — preserve the historic
+            # None contract so callers raise an accurate CalendarNotFoundError.
+            return None

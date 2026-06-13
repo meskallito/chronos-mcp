@@ -2,14 +2,16 @@
 Account management for Chronos MCP
 """
 
+import socket
 import threading
 import time
 import uuid
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional, TypeVar
 
 import caldav  # type: ignore[import-untyped,import-not-found]
+import requests  # type: ignore[import-untyped]
 from caldav import DAVClient, Principal
 
 from .config import ConfigManager
@@ -25,6 +27,43 @@ from .logging_config import setup_logging
 from .models import AccountStatus
 
 logger = setup_logging()
+
+T = TypeVar("T")
+
+
+def _is_stale_connection_error(exc: BaseException) -> bool:
+    """Heuristic: does this exception look like a dead/stale TCP socket?
+
+    iCloud (caldav.icloud.com) silently drops idle keep-alive connections after
+    ~15-20 s. The python caldav/requests/urllib3 stack does NOT detect the dead
+    socket: the next CalDAV op hangs for the full read timeout and then surfaces
+    as a requests ``Timeout`` / ``ConnectionError`` (or a raw socket error). We
+    treat those as healable: evict the cached client + reconnect (a fresh
+    DAVClient reads iCloud in ~0.4 s) and retry once. We deliberately do NOT
+    treat auth/HTTP-status errors as stale (those are real, not socket rot).
+    """
+    # NOTE: do NOT include bare socket.error / OSError here — OSError subclasses
+    # like PermissionError(403)/FileNotFoundError are NOT socket rot and must not
+    # trigger a reconnect+retry. The builtin ConnectionError already covers the
+    # real dead-socket cases (BrokenPipeError, ConnectionResetError,
+    # ConnectionAbortedError).
+    stale_types = (
+        requests.exceptions.ConnectionError,
+        requests.exceptions.Timeout,  # covers ReadTimeout / ConnectTimeout
+        requests.exceptions.ChunkedEncodingError,
+        ConnectionError,  # builtin: BrokenPipe / ConnectionReset / ConnectionAborted
+        socket.timeout,
+    )
+    seen = set()
+    cur: Optional[BaseException] = exc
+    # Walk the __cause__/__context__ chain — caldav often wraps the underlying
+    # requests/socket error inside its own DAVError.
+    while cur is not None and id(cur) not in seen:
+        if isinstance(cur, stale_types):
+            return True
+        seen.add(id(cur))
+        cur = cur.__cause__ or cur.__context__
+    return False
 
 
 class CircuitBreakerState(Enum):
@@ -388,6 +427,79 @@ class AccountManager:
                 self.connect_account(alias)
 
         return self.principals.get(alias)
+
+    def _force_reconnect(self, alias: str, request_id: Optional[str] = None) -> Principal:
+        """Evict the cached (stale) connection for ``alias`` and reconnect.
+
+        Used by the reactive-heal path. Acquires the per-alias lock so an evict +
+        reconnect is atomic w.r.t. ``get_connection``/``get_principal``. Returns
+        the freshly-connected principal.
+        """
+        if alias not in self._connection_locks:
+            self._connection_locks[alias] = threading.Lock()
+        with self._connection_locks[alias]:
+            if alias in self.connections or alias in self.principals:
+                logger.info(
+                    f"Evicting stale cached connection for '{alias}' and reconnecting",
+                    extra={"request_id": request_id},
+                )
+                self.disconnect_account(alias)
+            self.connect_account(alias, request_id=request_id)
+        principal = self.principals.get(alias)
+        if principal is None:  # pragma: no cover - connect_account raises on failure
+            raise AccountConnectionError(alias, request_id=request_id)
+        return principal
+
+    def execute_with_reconnect(
+        self,
+        operation: Callable[[Principal], T],
+        account_alias: Optional[str] = None,
+        request_id: Optional[str] = None,
+    ) -> T:
+        """Run a CalDAV ``operation`` against the account's principal, healing a
+        stale cached connection ONCE.
+
+        ``operation`` receives the (cached, warm) ``Principal`` and performs the
+        actual CalDAV round-trip(s) — e.g. ``principal.calendars()`` then
+        ``calendar.date_search(...)``. On the warm path this is a single call and
+        does NOT reconnect (no perf regression). If the operation raises an error
+        that looks like a dead/stale socket (see ``_is_stale_connection_error`` —
+        the iCloud idle-drop failure mode), we evict the cached client, reconnect
+        (~0.4 s for a fresh DAVClient), re-run ``operation`` with the FRESH
+        principal exactly once, and return its result.
+
+        Why reactive-heal (approach A) rather than disabling keep-alive: the local
+        Radicale ``default`` account is fast and its keep-alive is fine — forcing a
+        fresh connection on every call would tax it needlessly. Reactive heal keeps
+        the warm-path cache (fast when fresh) and pays the ~0.4 s reconnect cost
+        ONLY when a socket has actually gone stale.
+
+        Bounded to a single retry: a persistent failure re-raises honestly (an
+        ``AccountConnectionError`` from ``connect_account`` if the reconnect itself
+        fails, else the operation's own error) — never an infinite loop, never a
+        masked ``None``/empty result (preserves the de-mask invariant).
+        """
+        request_id = request_id or str(uuid.uuid4())
+        alias = account_alias or self.config.config.default_account
+        principal = self.get_principal(account_alias)
+        if principal is None:
+            # No alias and no default account — honest, non-retryable.
+            raise AccountNotFoundError(alias or "default", request_id=request_id)
+
+        try:
+            return operation(principal)
+        except Exception as exc:  # noqa: BLE001 - re-raised below if not healable
+            if not (alias and _is_stale_connection_error(exc)):
+                raise
+            logger.warning(
+                f"CalDAV operation on '{alias}' failed with a stale-connection error "
+                f"({type(exc).__name__}); evicting + reconnecting and retrying once",
+                extra={"request_id": request_id},
+            )
+            # _force_reconnect raises AccountConnectionError if the reconnect fails;
+            # that honest error propagates (we do NOT mask it).
+            fresh_principal = self._force_reconnect(alias, request_id=request_id)
+            return operation(fresh_principal)
 
     def test_account(self, alias: str, request_id: Optional[str] = None) -> Dict[str, Any]:
         """Test account connectivity and return structured result"""

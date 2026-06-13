@@ -19,8 +19,42 @@ class TestEventManager:
 
     @pytest.fixture
     def mock_calendar_manager(self):
-        """Mock CalendarManager"""
-        return Mock(spec=CalendarManager)
+        """Mock CalendarManager.
+
+        ``get_events_range`` now resolves the calendar AND runs date_search inside
+        one ``accounts.execute_with_reconnect`` closure (so a stale iCloud socket
+        on EITHER step heals). We wire ``.accounts.execute_with_reconnect`` as a
+        faithful passthrough that runs the operation against a mock principal, and
+        the real ``CalendarManager.find_calendar_in_principal`` staticmethod
+        resolves the calendar from that principal by url. Tests set
+        ``mock_calendar_manager._test_principal`` to the principal to use.
+        (Heal/reconnect behaviour itself is covered in test_reconnect_heal.py.)
+        """
+        mgr = Mock(spec=CalendarManager)
+        # `accounts` is an instance attribute, not in the class spec — set it.
+        # Give it a real default_account string so EventManager._get_default_account
+        # (self.calendars.accounts.config.config.default_account) returns a str.
+        mgr.accounts = Mock()
+        mgr.accounts.config.config.default_account = "default"
+        # find_calendar_in_principal is a staticmethod on the real class; expose it
+        # so the production code's reference (CalendarManager.find_calendar_in_principal)
+        # works, and the closure can call it.
+        mgr.find_calendar_in_principal = CalendarManager.find_calendar_in_principal
+
+        def _passthrough(operation, account_alias=None, request_id=None):
+            principal = getattr(mgr, "_test_principal", None)
+            return operation(principal)
+
+        mgr.accounts.execute_with_reconnect.side_effect = _passthrough
+        return mgr
+
+    @staticmethod
+    def _principal_with_calendar(calendar, uid):
+        """Build a mock principal whose calendars() yields ``calendar`` at ``uid``."""
+        calendar.url = f"https://caldav.example.com/calendars/user/{uid}/"
+        principal = Mock()
+        principal.calendars.return_value = [calendar]
+        return principal
 
     @pytest.fixture
     def mock_calendar(self):
@@ -247,7 +281,10 @@ class TestEventManager:
 
     def test_get_events_range_calendar_not_found(self, mock_calendar_manager):
         """Test getting events when calendar not found"""
-        mock_calendar_manager.get_calendar.return_value = None
+        # Principal has no calendar matching the requested uid.
+        empty_principal = Mock()
+        empty_principal.calendars.return_value = []
+        mock_calendar_manager._test_principal = empty_principal
 
         mgr = EventManager(mock_calendar_manager)
 
@@ -265,7 +302,9 @@ class TestEventManager:
 
     def test_get_events_range_success(self, mock_calendar_manager, mock_calendar):
         """Test successful event range retrieval"""
-        mock_calendar_manager.get_calendar.return_value = mock_calendar
+        mock_calendar_manager._test_principal = self._principal_with_calendar(
+            mock_calendar, "cal-123"
+        )
 
         # Create mock CalDAV events
         mock_event1 = Mock()
@@ -305,7 +344,9 @@ END:VEVENT"""
 
     def test_get_events_range_with_attendees(self, mock_calendar_manager, mock_calendar):
         """Test getting events with attendees"""
-        mock_calendar_manager.get_calendar.return_value = mock_calendar
+        mock_calendar_manager._test_principal = self._principal_with_calendar(
+            mock_calendar, "cal-123"
+        )
 
         mock_event = Mock()
         mock_event.data = """BEGIN:VEVENT
@@ -332,19 +373,26 @@ END:VEVENT"""
         assert result[0].attendees[0].name == "User One"
         assert result[0].attendees[1].role == "OPT-PARTICIPANT"
 
-    def test_get_events_range_exception(self, mock_calendar_manager, mock_calendar):
-        """Test event retrieval with exception"""
-        mock_calendar_manager.get_calendar.return_value = mock_calendar
-        mock_calendar.events.side_effect = Exception("CalDAV error")
+    def test_get_events_range_exception_propagates(self, mock_calendar_manager, mock_calendar):
+        """De-mask: a date_search failure must NOT be swallowed to [].
 
-        mgr = EventManager(mock_calendar_manager)
-        result = mgr.get_events_range(
-            calendar_uid="cal-123",
-            start_date=datetime.now(),
-            end_date=datetime.now() + timedelta(days=1),
+        The old code did `except Exception: return events` (empty), masking a
+        stale-socket timeout as "0 events, no error". The heal path retries
+        connection errors once; a genuine persistent error now surfaces honestly
+        instead of pretending the range is empty.
+        """
+        mock_calendar.date_search.side_effect = Exception("CalDAV error")
+        mock_calendar_manager._test_principal = self._principal_with_calendar(
+            mock_calendar, "cal-123"
         )
 
-        assert result == []
+        mgr = EventManager(mock_calendar_manager)
+        with pytest.raises(Exception, match="CalDAV error"):
+            mgr.get_events_range(
+                calendar_uid="cal-123",
+                start_date=datetime.now(),
+                end_date=datetime.now() + timedelta(days=1),
+            )
 
     def test_delete_event_calendar_not_found(self, mock_calendar_manager):
         """Test deleting event when calendar not found"""

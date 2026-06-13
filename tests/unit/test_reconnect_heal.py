@@ -1,0 +1,311 @@
+"""
+Unit tests for the reactive stale-connection heal.
+
+Background: iCloud (caldav.icloud.com) silently drops idle keep-alive sockets
+after ~15-20 s. The python caldav/requests stack does NOT detect the dead socket;
+the next CalDAV op hangs for the full read-timeout and never self-recovers without
+a reconnect. ``AccountManager.execute_with_reconnect`` heals this: on a
+dead-socket error it evicts the cached client, reconnects once, and retries the
+operation against the fresh principal.
+
+These tests use mocks only (no network).
+"""
+
+from unittest.mock import Mock, patch
+
+import pytest
+import requests
+
+from chronos_mcp.accounts import AccountManager, _is_stale_connection_error
+from chronos_mcp.calendars import CalendarManager
+from chronos_mcp.events import EventManager
+from chronos_mcp.exceptions import AccountConnectionError, AccountNotFoundError
+from chronos_mcp.models import Account
+
+
+@pytest.fixture
+def icloud_account():
+    return Account(
+        alias="icloud",
+        url="https://caldav.icloud.com",
+        username="user@icloud.com",
+        password="app-specific-pw",
+        display_name="iCloud",
+    )
+
+
+@pytest.fixture
+def radicale_account():
+    return Account(
+        alias="default",
+        url="http://radicale:5232",
+        username="local",
+        password="local",
+        display_name="Radicale",
+    )
+
+
+class TestStaleErrorClassifier:
+    def test_requests_timeout_is_stale(self):
+        assert _is_stale_connection_error(requests.exceptions.ReadTimeout("read timed out"))
+
+    def test_requests_connection_error_is_stale(self):
+        assert _is_stale_connection_error(requests.exceptions.ConnectionError("conn reset"))
+
+    def test_wrapped_in_cause_chain_is_stale(self):
+        inner = requests.exceptions.ReadTimeout("read timed out")
+        outer = RuntimeError("caldav wrapper")
+        outer.__cause__ = inner
+        assert _is_stale_connection_error(outer)
+
+    def test_value_error_is_not_stale(self):
+        assert not _is_stale_connection_error(ValueError("not found"))
+
+    def test_auth_error_is_not_stale(self):
+        # Auth/HTTP-status problems are real, must NOT trigger a reconnect+retry.
+        assert not _is_stale_connection_error(PermissionError("403"))
+
+
+class TestExecuteWithReconnect:
+    def _make_mgr(self, mock_config_manager, account):
+        mock_config_manager.add_account(account)
+        return AccountManager(mock_config_manager)
+
+    @patch("chronos_mcp.accounts.DAVClient")
+    def test_warm_path_does_not_reconnect(
+        self, mock_dav_client, mock_config_manager, icloud_account
+    ):
+        """No error -> operation runs once, no evict/reconnect (no perf regression)."""
+        mgr = self._make_mgr(mock_config_manager, icloud_account)
+        client = Mock()
+        principal = Mock()
+        client.principal.return_value = principal
+        mock_dav_client.return_value = client
+
+        # Warm the cache (one connect).
+        mgr.connect_account("icloud")
+        assert mock_dav_client.call_count == 1
+
+        op = Mock(return_value=["cal-a", "cal-b"])
+        result = mgr.execute_with_reconnect(op, account_alias="icloud")
+
+        assert result == ["cal-a", "cal-b"]
+        op.assert_called_once_with(principal)
+        # No second DAVClient construction => no reconnect.
+        assert mock_dav_client.call_count == 1
+
+    @patch("chronos_mcp.accounts.DAVClient")
+    def test_stale_then_success_evicts_reconnects_retries(
+        self, mock_dav_client, mock_config_manager, icloud_account
+    ):
+        """Stale-socket error ONCE -> evict + reconnect + retry -> returns result."""
+        mgr = self._make_mgr(mock_config_manager, icloud_account)
+
+        # Two distinct clients/principals so we can prove a fresh one was built.
+        stale_client, stale_principal = Mock(name="stale_client"), Mock(name="stale_principal")
+        fresh_client, fresh_principal = Mock(name="fresh_client"), Mock(name="fresh_principal")
+        stale_client.principal.return_value = stale_principal
+        fresh_client.principal.return_value = fresh_principal
+        mock_dav_client.side_effect = [stale_client, fresh_client]
+
+        mgr.connect_account("icloud")  # warm with stale_client
+        assert mgr.principals["icloud"] is stale_principal
+
+        # Operation fails on the stale principal, succeeds on the fresh one.
+        def op(principal):
+            if principal is stale_principal:
+                raise requests.exceptions.ReadTimeout("HTTPSConnectionPool: read timed out")
+            return ["fresh-result"]
+
+        result = mgr.execute_with_reconnect(op, account_alias="icloud")
+
+        assert result == ["fresh-result"]
+        # A second DAVClient was constructed (the reconnect).
+        assert mock_dav_client.call_count == 2
+        # Cache now holds the fresh principal (evict happened).
+        assert mgr.principals["icloud"] is fresh_principal
+
+    @patch("chronos_mcp.accounts.DAVClient")
+    def test_persistent_failure_surfaces_honest_error_bounded(
+        self, mock_dav_client, mock_config_manager, icloud_account
+    ):
+        """Stale error EVERY time -> honest AccountConnectionError, bounded retry."""
+        mgr = self._make_mgr(mock_config_manager, icloud_account)
+        client = Mock()
+        client.principal.return_value = Mock()
+        mock_dav_client.return_value = client
+        mgr.connect_account("icloud")
+
+        call_count = {"n": 0}
+
+        def op(principal):
+            call_count["n"] += 1
+            raise requests.exceptions.ConnectionError("connection reset by peer")
+
+        # The reconnect itself succeeds, but the retried op fails again -> the
+        # operation's own error propagates (NOT masked None/[]). Bounded: op runs
+        # at most twice (initial + one retry).
+        with pytest.raises(requests.exceptions.ConnectionError):
+            mgr.execute_with_reconnect(op, account_alias="icloud")
+        assert call_count["n"] == 2  # initial + exactly one retry (no infinite loop)
+
+    @patch("chronos_mcp.accounts.DAVClient")
+    def test_reconnect_failure_surfaces_account_connection_error(
+        self, mock_dav_client, mock_config_manager, icloud_account
+    ):
+        """If the reconnect can't establish a connection -> AccountConnectionError."""
+        mgr = self._make_mgr(mock_config_manager, icloud_account)
+        good_client = Mock()
+        good_client.principal.return_value = Mock()
+        # First construct succeeds (warm), reconnect attempts all fail.
+        mock_dav_client.side_effect = [
+            good_client,
+            requests.exceptions.ConnectionError("down"),
+            requests.exceptions.ConnectionError("down"),
+            requests.exceptions.ConnectionError("down"),
+        ]
+        mgr.connect_account("icloud")
+        mgr._base_retry_delay = 0  # don't sleep in test
+
+        def op(principal):
+            raise requests.exceptions.ReadTimeout("read timed out")
+
+        with pytest.raises(AccountConnectionError):
+            mgr.execute_with_reconnect(op, account_alias="icloud")
+
+    def test_no_alias_no_default_raises_not_found(self, mock_config_manager):
+        """Genuine 'no alias, no default' -> AccountNotFoundError (not a masked None)."""
+        mgr = AccountManager(mock_config_manager)
+        with pytest.raises(AccountNotFoundError):
+            mgr.execute_with_reconnect(lambda p: p, account_alias=None)
+
+    @patch("chronos_mcp.accounts.DAVClient")
+    def test_non_stale_error_not_retried(
+        self, mock_dav_client, mock_config_manager, icloud_account
+    ):
+        """A non-connection error (e.g. ValueError) must NOT trigger a reconnect."""
+        mgr = self._make_mgr(mock_config_manager, icloud_account)
+        client = Mock()
+        client.principal.return_value = Mock()
+        mock_dav_client.return_value = client
+        mgr.connect_account("icloud")
+
+        def op(principal):
+            raise ValueError("genuine no match")
+
+        with pytest.raises(ValueError):
+            mgr.execute_with_reconnect(op, account_alias="icloud")
+        # Only the warm connect, no reconnect.
+        assert mock_dav_client.call_count == 1
+
+
+class TestManagerIntegration:
+    @patch("chronos_mcp.accounts.DAVClient")
+    def test_get_events_range_heals_stale_date_search(
+        self, mock_dav_client, mock_config_manager, icloud_account
+    ):
+        """get_events_range: stale socket on date_search -> reconnect -> events."""
+        from datetime import datetime, timezone
+
+        mock_config_manager.add_account(icloud_account)
+        accounts = AccountManager(mock_config_manager)
+
+        # Build a calendar whose url ends in the target uid.
+        def make_calendar(stale: bool):
+            cal = Mock()
+            cal.url = "https://caldav.icloud.com/123/calendars/fam-uid/"
+            if stale:
+                cal.date_search.side_effect = requests.exceptions.ReadTimeout("read timed out")
+            else:
+                event = Mock()
+                event.data = (
+                    "BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:e1\nSUMMARY:Real Event\n"
+                    "DTSTART:20260615T100000Z\nDTEND:20260615T110000Z\n"
+                    "END:VEVENT\nEND:VCALENDAR"
+                )
+                cal.date_search.return_value = [event]
+            return cal
+
+        stale_principal = Mock(name="stale_principal")
+        stale_principal.calendars.return_value = [make_calendar(stale=True)]
+        fresh_principal = Mock(name="fresh_principal")
+        fresh_principal.calendars.return_value = [make_calendar(stale=False)]
+
+        stale_client = Mock()
+        stale_client.principal.return_value = stale_principal
+        fresh_client = Mock()
+        fresh_client.principal.return_value = fresh_principal
+        mock_dav_client.side_effect = [stale_client, fresh_client]
+
+        accounts.connect_account("icloud")  # warm with stale
+
+        cal_mgr = CalendarManager(accounts)
+        evt_mgr = EventManager(cal_mgr)
+
+        events = evt_mgr.get_events_range(
+            "fam-uid",
+            datetime(2026, 6, 1, tzinfo=timezone.utc),
+            datetime(2026, 6, 30, tzinfo=timezone.utc),
+            account_alias="icloud",
+        )
+
+        assert len(events) == 1
+        assert events[0].summary == "Real Event"
+        # Reconnect happened: a fresh DAVClient was built.
+        assert mock_dav_client.call_count == 2
+
+    @patch("chronos_mcp.accounts.DAVClient")
+    def test_list_calendars_heals_stale_lookup(
+        self, mock_dav_client, mock_config_manager, icloud_account
+    ):
+        """list_calendars: stale socket on principal.calendars() -> reconnect."""
+        mock_config_manager.add_account(icloud_account)
+        accounts = AccountManager(mock_config_manager)
+
+        stale_principal = Mock()
+        stale_principal.calendars.side_effect = requests.exceptions.ReadTimeout("timed out")
+        fresh_cal = Mock()
+        fresh_cal.url = "https://caldav.icloud.com/123/calendars/work/"
+        fresh_cal.name = "Work"
+        fresh_principal = Mock()
+        fresh_principal.calendars.return_value = [fresh_cal]
+
+        stale_client = Mock()
+        stale_client.principal.return_value = stale_principal
+        fresh_client = Mock()
+        fresh_client.principal.return_value = fresh_principal
+        mock_dav_client.side_effect = [stale_client, fresh_client]
+
+        accounts.connect_account("icloud")
+        cal_mgr = CalendarManager(accounts)
+
+        calendars = cal_mgr.list_calendars(account_alias="icloud")
+        assert len(calendars) == 1
+        assert calendars[0].name == "Work"
+        assert mock_dav_client.call_count == 2
+
+    @patch("chronos_mcp.accounts.DAVClient")
+    def test_radicale_warm_path_unaffected(
+        self, mock_dav_client, mock_config_manager, radicale_account
+    ):
+        """Radicale (local 'default') warm read does NOT reconnect — no regression."""
+        mock_config_manager.add_account(radicale_account)
+        accounts = AccountManager(mock_config_manager)
+
+        cal = Mock()
+        cal.url = "http://radicale:5232/local/reminders/"
+        cal.name = "Reminders"
+        principal = Mock()
+        principal.calendars.return_value = [cal]
+        client = Mock()
+        client.principal.return_value = principal
+        mock_dav_client.return_value = client
+
+        accounts.connect_account("default")
+        cal_mgr = CalendarManager(accounts)
+
+        calendars = cal_mgr.list_calendars(account_alias="default")
+        assert len(calendars) == 1
+        assert calendars[0].name == "Reminders"
+        # No reconnect — Radicale keep-alive is untouched.
+        assert mock_dav_client.call_count == 1

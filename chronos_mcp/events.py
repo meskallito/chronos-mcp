@@ -195,22 +195,31 @@ class EventManager:
         """Get events within a date range - raises exceptions on failure"""
         request_id = request_id or str(uuid.uuid4())
 
-        calendar = self.calendars.get_calendar(calendar_uid, account_alias, request_id=request_id)
-        if not calendar:
-            raise CalendarNotFoundError(calendar_uid, account_alias, request_id=request_id)
+        # Stale-connection heal: resolve the calendar AND run date_search inside a
+        # single execute_with_reconnect closure, so a dead iCloud socket that
+        # surfaces on EITHER the principal.calendars() lookup or the date_search
+        # itself triggers exactly one evict+reconnect+retry (warm path = no
+        # reconnect). date_search is the heavy CalDAV round-trip that hangs for the
+        # full read-timeout on a stale socket; running it against the freshly
+        # reconnected principal is what makes idle iCloud reads reliable.
+        def _resolve_and_search(principal):
+            calendar = CalendarManager.find_calendar_in_principal(principal, calendar_uid)
+            if not calendar:
+                raise CalendarNotFoundError(calendar_uid, account_alias, request_id=request_id)
+            return calendar.date_search(start=start_date, end=end_date, expand=True)
+
+        # De-masking note: the old `except Exception: return []` swallow here turned
+        # a stale-socket timeout into a misleading "0 events, no error". The heal
+        # path retries once; a genuine persistent failure now surfaces honestly.
+        results = self.calendars.accounts.execute_with_reconnect(
+            _resolve_and_search, account_alias=account_alias, request_id=request_id
+        )
 
         events = []
-        try:
-            # Search for events in date range
-            results = calendar.date_search(start=start_date, end=end_date, expand=True)
-
-            for caldav_event in results:
-                event_data = self._parse_caldav_event(caldav_event, calendar_uid, account_alias)
-                if event_data:
-                    events.append(event_data)
-
-        except Exception as e:
-            logger.error(f"Error getting events: {e}")
+        for caldav_event in results:
+            event_data = self._parse_caldav_event(caldav_event, calendar_uid, account_alias)
+            if event_data:
+                events.append(event_data)
 
         return events
 

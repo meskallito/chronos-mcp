@@ -15,11 +15,31 @@ class TestCalendarManager:
 
     @pytest.fixture
     def mock_account_manager(self):
-        """Mock AccountManager"""
+        """Mock AccountManager.
+
+        ``execute_with_reconnect`` is wired as a faithful passthrough of the REAL
+        contract: resolve the principal via ``get_principal`` (raising
+        AccountNotFoundError if None for a named alias, propagating its errors),
+        then run the operation against it. This lets the existing calendar/event
+        tests keep configuring ``get_principal``/``principal.calendars()`` while
+        exercising the new heal-routed code paths. (The reconnect/heal behaviour
+        itself is covered directly in test_reconnect_heal.py.)
+        """
         mock = Mock(spec=AccountManager)
         mock.config = Mock()
         mock.config.config = Mock()
         mock.config.config.default_account = "default"
+
+        def _passthrough(operation, account_alias=None, request_id=None):
+            from chronos_mcp.exceptions import AccountNotFoundError
+
+            principal = mock.get_principal(account_alias)
+            if principal is None:
+                alias = account_alias or mock.config.config.default_account or "default"
+                raise AccountNotFoundError(alias, request_id=request_id)
+            return operation(principal)
+
+        mock.execute_with_reconnect.side_effect = _passthrough
         return mock
 
     @pytest.fixture
