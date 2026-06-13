@@ -94,10 +94,13 @@ async def remove_account(
     if not _managers["config_manager"].get_account(alias):
         raise AccountNotFoundError(alias, request_id=request_id)
 
-    # Use the lock-acquiring variant: disconnect_account is lock-free and must be
-    # serialized w.r.t. request-thread reconnect / idle-heal paths.
-    _managers["account_manager"].disconnect_account_locked(alias)
-    _managers["config_manager"].remove_account(alias)
+    # Atomic under the per-alias lock: the evict AND the config removal happen
+    # while the lock is held, so a waiting reconnect / idle-heal path that
+    # reacquires the lock finds NO config and raises AccountNotFoundError instead
+    # of re-caching a LIVE principal for the just-removed account. (Doing these as
+    # two separate locked steps left a window where a waiter could reconnect from
+    # the still-present config between the disconnect and the config removal.)
+    _managers["account_manager"].remove_account_locked(alias)
 
     return create_success_response(
         message=f"Account '{alias}' removed successfully",

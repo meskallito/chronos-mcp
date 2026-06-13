@@ -362,6 +362,29 @@ class AccountManager:
         with self._lock_for(alias):
             self.disconnect_account(alias)
 
+    def remove_account_locked(self, alias: str) -> None:
+        """Atomically evict the cached connection AND remove the config entry.
+
+        Holds the per-alias lock across BOTH the (lock-free) ``disconnect_account``
+        evict AND ``config_manager.remove_account(alias)``. This closes a race
+        where ``disconnect_account_locked`` releases the lock before the config is
+        removed: a waiting ``get_principal`` / ``get_connection`` /
+        ``execute_with_reconnect`` could reacquire the lock, find no cached
+        connection, reconnect from the STILL-PRESENT config, and leave a LIVE
+        principal cached for an account that is then removed. By removing the
+        config while the lock is held, any waiter that reacquires finds NO config
+        and ``connect_account`` raises ``AccountNotFoundError`` before it can
+        re-cache anything.
+
+        Non-reentrant lock: only the lock-free ``disconnect_account`` is called
+        here (NOT ``disconnect_account_locked``), so there is no self-deadlock.
+        ``config_manager`` has no internal lock, so there is no lock-order
+        inversion to worry about.
+        """
+        with self._lock_for(alias):
+            self.disconnect_account(alias)
+            self.config.remove_account(alias)
+
     def _cleanup_stale_connection(self, alias: str):
         """Clean up a specific stale connection"""
         if alias in self._connection_timestamps:

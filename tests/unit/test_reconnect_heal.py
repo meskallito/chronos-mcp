@@ -375,6 +375,83 @@ class TestProactiveIdleReconnect:
         assert mock_dav_client.call_count == 1
 
 
+class TestRemoveAccountAtomicEviction:
+    """``remove_account_locked`` must evict the cached connection AND remove the
+    config entry ATOMICALLY under the per-alias lock, so a concurrent reconnect
+    can't re-cache a LIVE principal for an account that is being removed."""
+
+    @patch("chronos_mcp.accounts.DAVClient")
+    def test_remove_evicts_cache_and_removes_config(
+        self, mock_dav_client, mock_config_manager, icloud_account
+    ):
+        mock_config_manager.add_account(icloud_account)
+        mgr = AccountManager(mock_config_manager)
+
+        client = Mock()
+        client.principal.return_value = Mock()
+        mock_dav_client.return_value = client
+        mgr.connect_account("icloud")  # warm the cache
+        assert "icloud" in mgr.principals
+        assert mock_config_manager.get_account("icloud") is not None
+
+        mgr.remove_account_locked("icloud")
+
+        # No cached connection/principal/timestamps survive, and config is gone.
+        assert "icloud" not in mgr.connections
+        assert "icloud" not in mgr.principals
+        assert "icloud" not in mgr._connection_timestamps
+        assert "icloud" not in mgr._last_activity
+        assert mock_config_manager.get_account("icloud") is None
+
+    @patch("chronos_mcp.accounts.DAVClient")
+    def test_concurrent_reconnect_cannot_recache_removed_account(
+        self, mock_dav_client, mock_config_manager, icloud_account
+    ):
+        """Simulate a waiter that reacquires the per-alias lock the instant the
+        removal releases it, and tries to reconnect (get_principal). Because the
+        config was removed WHILE the lock was held, connect_account must raise
+        AccountNotFoundError and NO live principal may remain cached.
+
+        We prove the ordering by spying on disconnect_account (called inside the
+        locked removal): at that moment the config must still be present (so the
+        eviction is meaningful) and the lock must be held; then immediately after
+        remove_account_locked returns, a get_principal reconnect attempt fails.
+        """
+        mock_config_manager.add_account(icloud_account)
+        mgr = AccountManager(mock_config_manager)
+
+        client = Mock()
+        client.principal.return_value = Mock()
+        mock_dav_client.return_value = client
+        mgr.connect_account("icloud")  # warm
+
+        lock = mgr._lock_for("icloud")
+        observed = {"lock_held_during_evict": None, "config_present_during_evict": None}
+        real_disconnect = mgr.disconnect_account
+
+        def spy_disconnect(alias):
+            if alias == "icloud":
+                observed["lock_held_during_evict"] = lock.locked()
+                observed["config_present_during_evict"] = (
+                    mock_config_manager.get_account("icloud") is not None
+                )
+            return real_disconnect(alias)
+
+        with patch.object(mgr, "disconnect_account", side_effect=spy_disconnect):
+            mgr.remove_account_locked("icloud")
+
+        # The evict ran under the lock, while config was still present (atomic window).
+        assert observed["lock_held_during_evict"] is True
+        assert observed["config_present_during_evict"] is True
+
+        # A waiter that now reacquires the lock and tries to reconnect finds NO
+        # config -> AccountNotFoundError, and NOTHING is re-cached.
+        with pytest.raises(AccountNotFoundError):
+            mgr.get_principal("icloud")
+        assert "icloud" not in mgr.principals
+        assert "icloud" not in mgr.connections
+
+
 class TestManagerIntegration:
     @patch("chronos_mcp.accounts.DAVClient")
     def test_get_events_range_heals_stale_date_search(
