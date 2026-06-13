@@ -8,10 +8,9 @@ import time
 import uuid
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Callable, Dict, Optional, TypeVar
+from typing import Any, Callable, Dict, Optional, Tuple, Type, TypeVar
 
 import caldav  # type: ignore[import-untyped,import-not-found]
-import requests  # type: ignore[import-untyped]
 from caldav import DAVClient, Principal
 
 from .config import ConfigManager
@@ -31,35 +30,68 @@ logger = setup_logging()
 T = TypeVar("T")
 
 
+def _http_backend_stale_types() -> Tuple[Type[BaseException], ...]:
+    """Collect the HTTP backend's ConnectionError/Timeout exception classes.
+
+    caldav's HTTP backend differs by version: caldav>=3 uses ``niquests`` (a
+    requests-compatible fork), older caldav uses ``requests``. The slim
+    production image ships ONLY the backend caldav actually depends on, so we
+    must NOT hard-import either — we import whichever is present (best-effort)
+    and fall back to a class-name heuristic for any we miss. (A hard
+    ``import requests`` here previously crashed the caldav>=3 production image,
+    which has niquests but not requests.)
+    """
+    types: list = []
+    for mod_name in ("niquests", "requests"):
+        try:
+            exc_mod = __import__(f"{mod_name}.exceptions", fromlist=["exceptions"])
+        except Exception:  # noqa: BLE001 - backend simply not installed
+            continue
+        for attr in ("ConnectionError", "Timeout", "ChunkedEncodingError"):
+            cls = getattr(exc_mod, attr, None)
+            if isinstance(cls, type):
+                types.append(cls)
+    return tuple(types)
+
+
+# Resolved once at import. Note: do NOT add bare socket.error / OSError —
+# OSError subclasses like PermissionError(403)/FileNotFoundError are NOT socket
+# rot and must not trigger a reconnect+retry. The builtin ConnectionError covers
+# the real dead-socket cases (BrokenPipeError/ConnectionResetError/
+# ConnectionAbortedError); socket.timeout covers raw socket read timeouts.
+_STALE_TYPES: Tuple[Type[BaseException], ...] = _http_backend_stale_types() + (
+    ConnectionError,  # builtin
+    socket.timeout,
+)
+
+
 def _is_stale_connection_error(exc: BaseException) -> bool:
     """Heuristic: does this exception look like a dead/stale TCP socket?
 
     iCloud (caldav.icloud.com) silently drops idle keep-alive connections after
-    ~15-20 s. The python caldav/requests/urllib3 stack does NOT detect the dead
+    ~15-20 s. The python caldav/niquests/urllib3 stack does NOT detect the dead
     socket: the next CalDAV op hangs for the full read timeout and then surfaces
-    as a requests ``Timeout`` / ``ConnectionError`` (or a raw socket error). We
+    as a backend ``Timeout`` / ``ConnectionError`` (or a raw socket error). We
     treat those as healable: evict the cached client + reconnect (a fresh
     DAVClient reads iCloud in ~0.4 s) and retry once. We deliberately do NOT
     treat auth/HTTP-status errors as stale (those are real, not socket rot).
+
+    Matches both by class (``_STALE_TYPES``) and, as a backend-agnostic safety
+    net, by module+name heuristic (``<backend>.exceptions`` + the name mentions
+    Timeout/ConnectionError) — so a backend we couldn't import still heals.
+    Walks the ``__cause__``/``__context__`` chain because caldav often wraps the
+    underlying transport error inside its own DAVError.
     """
-    # NOTE: do NOT include bare socket.error / OSError here — OSError subclasses
-    # like PermissionError(403)/FileNotFoundError are NOT socket rot and must not
-    # trigger a reconnect+retry. The builtin ConnectionError already covers the
-    # real dead-socket cases (BrokenPipeError, ConnectionResetError,
-    # ConnectionAbortedError).
-    stale_types = (
-        requests.exceptions.ConnectionError,
-        requests.exceptions.Timeout,  # covers ReadTimeout / ConnectTimeout
-        requests.exceptions.ChunkedEncodingError,
-        ConnectionError,  # builtin: BrokenPipe / ConnectionReset / ConnectionAborted
-        socket.timeout,
-    )
     seen = set()
     cur: Optional[BaseException] = exc
-    # Walk the __cause__/__context__ chain — caldav often wraps the underlying
-    # requests/socket error inside its own DAVError.
     while cur is not None and id(cur) not in seen:
-        if isinstance(cur, stale_types):
+        if isinstance(cur, _STALE_TYPES):
+            return True
+        mod = type(cur).__module__ or ""
+        name = type(cur).__name__
+        if mod.endswith("exceptions") and (
+            "ConnectionError" in name or "Timeout" in name or "ChunkedEncoding" in name
+        ):
             return True
         seen.add(id(cur))
         cur = cur.__cause__ or cur.__context__
