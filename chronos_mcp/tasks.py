@@ -131,7 +131,10 @@ def _anchor_for(
         return existing_due
     if all_day:
         return datetime.now(_default_tz()).date()
-    return datetime.now(_default_tz())
+    # Timed due-less anchor: normalize to UTC (mirrors the DUE/DTSTART write
+    # path) so it serializes as ``DTSTART:...Z`` with no TZID parameter —
+    # avoiding the RFC 5545 §3.2.19 requirement to embed a matching VTIMEZONE.
+    return datetime.now(_default_tz()).astimezone(timezone.utc)
 
 
 class TaskManager:
@@ -705,16 +708,23 @@ class TaskManager:
                     # flattens a date to midnight-UTC — the read-side of the
                     # original day-shift bug.
                     due_prop = component.get("due")
-                    if due_prop is not None:
+                    # A recurring VTODO emits its anchor as DTSTART and (per RFC
+                    # 5545 §3.8.2.3) DROPS a DUE that would equal it, so a no-DUE
+                    # recurring task carries only DTSTART. When DUE is absent, fall
+                    # back to DTSTART as the source for ``due``/``all_day`` so such
+                    # tasks round-trip with their anchor date instead of None.
+                    # DUE takes precedence when present.
+                    date_prop = due_prop if due_prop is not None else component.get("dtstart")
+                    if date_prop is not None:
                         # VALUE=DATE → ``.dt`` is a ``date`` that is not a ``datetime``.
-                        is_date = hasattr(due_prop, "dt") and _is_date_value(due_prop)
+                        is_date = hasattr(date_prop, "dt") and _is_date_value(date_prop)
                         if is_date:
                             all_day = True
                             # Midnight in the default zone, NOT UTC, so callers
                             # formatting ``due.date()`` get the correct day.
-                            due_dt = datetime.combine(due_prop.dt, time.min, tzinfo=_default_tz())
+                            due_dt = datetime.combine(date_prop.dt, time.min, tzinfo=_default_tz())
                         else:
-                            due_dt = ical_to_datetime(due_prop)
+                            due_dt = ical_to_datetime(date_prop)
                     if component.get("completed"):
                         completed_dt = ical_to_datetime(component.get("completed"))
 

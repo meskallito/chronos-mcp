@@ -1117,6 +1117,57 @@ class TestCreateTaskRecurrence:
         assert any(line.startswith("DTSTART") for line in ical.splitlines())
         assert any(line.startswith("RRULE") for line in ical.splitlines())
 
+    def test_recurring_no_due_timed_anchor_serializes_utc_no_tzid(
+        self, mock_calendar_manager, mock_calendar, monkeypatch
+    ):
+        """No due + NOT all_day ⇒ the today-in-default-tz anchor MUST be
+        normalized to UTC (``DTSTART:...Z`` with NO TZID) so it never references a
+        TZID without a matching VTIMEZONE (RFC 5545 §3.2.19)."""
+        monkeypatch.setenv("CHRONOS_DEFAULT_TIMEZONE", "America/New_York")
+        from chronos_mcp.utils import _resolve_default_tz
+
+        _resolve_default_tz.cache_clear()
+        mgr = TaskManager(mock_calendar_manager)
+        mock_calendar_manager.get_calendar.return_value = mock_calendar
+
+        mgr.create_task(
+            calendar_uid="cal-123",
+            summary="Due-less timed recurring task",
+            recurrence_rule="FREQ=WEEKLY;COUNT=10",
+        )
+
+        ical = self._captured_ical(mock_calendar)
+        dtstart_line = next(line for line in ical.splitlines() if line.startswith("DTSTART"))
+        # UTC instant: ends with Z, no TZID parameter, and no VTIMEZONE emitted.
+        assert "TZID" not in dtstart_line
+        assert dtstart_line.split(":", 1)[1].endswith("Z")
+        assert "VTIMEZONE" not in ical
+
+    def test_recurring_no_due_timed_round_trip(self, mock_calendar_manager, mock_calendar):
+        """Round-trip: create a recurring task with NO explicit due, parse the
+        emitted VTODO back, and confirm due/all_day/recurrence_rule are populated
+        (not None/False) thanks to the read-path DTSTART fallback."""
+        mgr = TaskManager(mock_calendar_manager)
+        mock_calendar_manager.get_calendar.return_value = mock_calendar
+
+        mgr.create_task(
+            calendar_uid="cal-123",
+            summary="Round-trip recurring task",
+            recurrence_rule="FREQ=WEEKLY;COUNT=10",
+        )
+
+        ical = self._captured_ical(mock_calendar)
+        parsed = Mock()
+        parsed.data = ical
+        result = mgr._parse_caldav_task(
+            parsed, calendar_uid="cal-123", account_alias="test_account"
+        )
+        assert result is not None
+        assert result.due is not None
+        assert result.all_day is False
+        assert result.recurrence_rule is not None
+        assert result.recurrence_rule.startswith("FREQ=WEEKLY")
+
     # ---- returned Task model carries all_day / recurrence_rule ------------
 
     def test_returned_model_carries_all_day_for_date_only(
@@ -1675,3 +1726,74 @@ class TestParseCaldavTaskReadPath:
         assert result.due is not None
         assert result.due.hour == 14
         assert result.due.minute == 30
+
+    def test_recurring_date_only_no_due_falls_back_to_dtstart(
+        self, mock_calendar_manager, monkeypatch
+    ):
+        """A recurring date-only task carries only DTSTART;VALUE=DATE + RRULE (no
+        DUE, dropped per RFC 5545 §3.8.2.3). It MUST read back all_day=True with
+        ``due`` anchored to the DTSTART date and its recurrence_rule populated."""
+        from zoneinfo import ZoneInfo
+
+        monkeypatch.setenv("CHRONOS_DEFAULT_TIMEZONE", "America/New_York")
+        from chronos_mcp.utils import _resolve_default_tz
+
+        _resolve_default_tz.cache_clear()
+        mgr = TaskManager(mock_calendar_manager)
+        caldav_task = self._caldav_task(
+            [
+                "DTSTART;VALUE=DATE:20260621",
+                "RRULE:FREQ=DAILY;COUNT=30",
+            ]
+        )
+        result = mgr._parse_caldav_task(
+            caldav_task, calendar_uid="cal-123", account_alias="test_account"
+        )
+        assert result is not None
+        assert result.all_day is True
+        assert result.due is not None
+        ny = ZoneInfo("America/New_York")
+        assert result.due.astimezone(ny).date().isoformat() == "2026-06-21"
+        assert result.recurrence_rule is not None
+        assert result.recurrence_rule.startswith("FREQ=DAILY")
+
+    def test_recurring_timed_no_due_falls_back_to_dtstart(self, mock_calendar_manager):
+        """A recurring timed task carries only DTSTART:...Z + RRULE (no DUE). It
+        MUST read back the correct instant (all_day False) with recurrence_rule."""
+        mgr = TaskManager(mock_calendar_manager)
+        caldav_task = self._caldav_task(
+            [
+                "DTSTART:20260622T090000Z",
+                "RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;COUNT=10",
+            ]
+        )
+        result = mgr._parse_caldav_task(
+            caldav_task, calendar_uid="cal-123", account_alias="test_account"
+        )
+        assert result is not None
+        assert result.all_day is False
+        assert result.due is not None
+        assert result.due.astimezone(timezone.utc).hour == 9
+        assert result.due.astimezone(timezone.utc).date().isoformat() == "2026-06-22"
+        assert result.recurrence_rule is not None
+        assert result.recurrence_rule.startswith("FREQ=WEEKLY")
+
+    def test_due_takes_precedence_over_dtstart_when_present(self, mock_calendar_manager):
+        """When both DUE and DTSTART are present, DUE remains the source for the
+        Task's ``due``/``all_day`` (DTSTART fallback only kicks in when DUE absent)."""
+        mgr = TaskManager(mock_calendar_manager)
+        caldav_task = self._caldav_task(
+            [
+                "DTSTART:20260622T090000Z",
+                "DUE:20260622T100000Z",
+                "RRULE:FREQ=WEEKLY",
+            ]
+        )
+        result = mgr._parse_caldav_task(
+            caldav_task, calendar_uid="cal-123", account_alias="test_account"
+        )
+        assert result is not None
+        assert result.all_day is False
+        assert result.due is not None
+        # DUE (10:00), not DTSTART (09:00), drives the parsed value.
+        assert result.due.astimezone(timezone.utc).hour == 10
