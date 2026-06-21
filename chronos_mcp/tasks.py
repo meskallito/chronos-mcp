@@ -48,6 +48,7 @@ class TaskManager:
         priority: Optional[int] = None,
         status: TaskStatus = TaskStatus.NEEDS_ACTION,
         related_to: Optional[List[str]] = None,
+        all_day: bool = False,
         account_alias: Optional[str] = None,
         request_id: Optional[str] = None,
     ) -> Optional[Task]:
@@ -72,7 +73,12 @@ class TaskManager:
             if description:
                 task.add("description", description)
             if due:
-                task.add("due", due)
+                if all_day:
+                    # Emit DUE;VALUE=DATE:YYYYMMDD (no time, no UTC day-shift)
+                    due_value = due.date() if isinstance(due, datetime) else due
+                    task.add("due", due_value)
+                else:
+                    task.add("due", due)
             if priority is not None and 1 <= priority <= 9:
                 task.add("priority", priority)
             task.add("status", status.value)

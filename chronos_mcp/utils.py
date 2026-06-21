@@ -42,6 +42,26 @@ def _default_tz() -> tzinfo:
     return _resolve_default_tz(os.getenv("CHRONOS_DEFAULT_TIMEZONE", "UTC"))
 
 
+def _is_date_only(s: str) -> bool:
+    """Return True only for a bare ``YYYY-MM-DD`` date string.
+
+    Matches a date with no time component at all (no ``T`` separator and no
+    ``:`` time token). Deliberately does NOT match ``2026-06-21T00:00:00``:
+    that midnight-datetime case is handled by the explicit ``all_day`` param
+    (and the coach-prompt change), not by this heuristic.
+    """
+    if not isinstance(s, str):
+        return False
+    s = s.strip()
+    if "T" in s or ":" in s:
+        return False
+    try:
+        datetime.strptime(s, "%Y-%m-%d")
+    except ValueError:
+        return False
+    return True
+
+
 def parse_datetime(dt_str: Union[str, datetime]) -> datetime:
     """Parse datetime string or return datetime object"""
     if isinstance(dt_str, datetime):

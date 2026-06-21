@@ -103,6 +103,71 @@ class TestTaskToolsComprehensive:
         _managers["task_manager"].create_task.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_create_task_bare_date_autodetects_all_day(self, setup_managers, sample_task):
+        """A bare YYYY-MM-DD due string auto-detects all_day=True for the manager."""
+        _managers["task_manager"].create_task.return_value = sample_task
+
+        result = await create_task.fn(
+            calendar_uid="cal-123",
+            summary="Date-only Task",
+            description=None,
+            due="2026-06-21",
+            priority=None,
+            status="NEEDS-ACTION",
+            related_to=None,
+            all_day=False,
+            account=None,
+        )
+
+        assert result["success"] is True
+        _, kwargs = _managers["task_manager"].create_task.call_args
+        assert kwargs["all_day"] is True
+        # Still threaded as a datetime on the same calendar day
+        assert kwargs["due"].date() == datetime(2026, 6, 21).date()
+
+    @pytest.mark.asyncio
+    async def test_create_task_explicit_all_day_with_datetime(self, setup_managers, sample_task):
+        """Explicit all_day=True with a datetime input threads all_day=True."""
+        _managers["task_manager"].create_task.return_value = sample_task
+
+        result = await create_task.fn(
+            calendar_uid="cal-123",
+            summary="Date-only Task",
+            description=None,
+            due="2026-06-21T15:00:00",
+            priority=None,
+            status="NEEDS-ACTION",
+            related_to=None,
+            all_day=True,
+            account=None,
+        )
+
+        assert result["success"] is True
+        _, kwargs = _managers["task_manager"].create_task.call_args
+        assert kwargs["all_day"] is True
+
+    @pytest.mark.asyncio
+    async def test_create_task_midnight_datetime_stays_timed(self, setup_managers, sample_task):
+        """A ...T00:00:00 input WITHOUT all_day stays a timed task (heuristic boundary)."""
+        _managers["task_manager"].create_task.return_value = sample_task
+
+        result = await create_task.fn(
+            calendar_uid="cal-123",
+            summary="Midnight Task",
+            description=None,
+            due="2026-06-21T00:00:00",
+            priority=None,
+            status="NEEDS-ACTION",
+            related_to=None,
+            all_day=False,
+            account=None,
+        )
+
+        assert result["success"] is True
+        _, kwargs = _managers["task_manager"].create_task.call_args
+        assert kwargs["all_day"] is False
+
+    @pytest.mark.asyncio
     async def test_create_task_priority_string_conversion(self, setup_managers, sample_task):
         """Test create_task converts string priority to int"""
         _managers["task_manager"].create_task.return_value = sample_task

@@ -908,3 +908,87 @@ class TestTaskManager:
         mock_calendar_manager.get_calendar.assert_called_with(
             "cal-123", None, request_id="custom-request-id"
         )
+
+
+class TestCreateTaskDateOnly:
+    """Test date-only (all_day) task creation emits DUE;VALUE=DATE."""
+
+    @pytest.fixture
+    def mock_calendar_manager(self):
+        manager = Mock(spec=CalendarManager)
+        manager.accounts = Mock()
+        manager.accounts.config = Mock()
+        manager.accounts.config.config = Mock()
+        manager.accounts.config.config.default_account = "test_account"
+        return manager
+
+    @pytest.fixture
+    def mock_calendar(self):
+        calendar = Mock()
+        calendar.save_todo = Mock()
+        calendar.save_event = Mock()
+        return calendar
+
+    @staticmethod
+    def _captured_ical(mock_calendar):
+        """Return the iCal string passed to save_todo."""
+        assert mock_calendar.save_todo.called
+        return mock_calendar.save_todo.call_args[0][0]
+
+    def test_all_day_with_datetime_emits_value_date(self, mock_calendar_manager, mock_calendar):
+        """all_day=True with a datetime due ⇒ DUE;VALUE=DATE:YYYYMMDD (no T/Z)."""
+        mgr = TaskManager(mock_calendar_manager)
+        mock_calendar_manager.get_calendar.return_value = mock_calendar
+
+        result = mgr.create_task(
+            calendar_uid="cal-123",
+            summary="Date-only task",
+            due=datetime(2026, 6, 21, 0, 0, tzinfo=timezone.utc),
+            all_day=True,
+        )
+
+        ical = self._captured_ical(mock_calendar)
+        assert "DUE;VALUE=DATE:20260621" in ical
+        # No time component (no DATE-TIME "T" separator) / no UTC "Z" in the value
+        due_line = next(line for line in ical.splitlines() if line.startswith("DUE"))
+        due_value = due_line.split(":", 1)[1]
+        assert "T" not in due_value
+        assert "Z" not in due_value
+        # Returned Task reflects the intended calendar day
+        assert result is not None
+        assert result.due.date() == datetime(2026, 6, 21).date()
+
+    def test_all_day_with_date_emits_value_date(self, mock_calendar_manager, mock_calendar):
+        """all_day=True with a python date due ⇒ DUE;VALUE=DATE."""
+        from datetime import date
+
+        mgr = TaskManager(mock_calendar_manager)
+        mock_calendar_manager.get_calendar.return_value = mock_calendar
+
+        mgr.create_task(
+            calendar_uid="cal-123",
+            summary="Date-only task",
+            due=date(2026, 6, 21),
+            all_day=True,
+        )
+
+        ical = self._captured_ical(mock_calendar)
+        assert "DUE;VALUE=DATE:20260621" in ical
+
+    def test_timed_due_not_shifted_and_keeps_time(self, mock_calendar_manager, mock_calendar):
+        """A timed due (all_day=False) keeps a DATE-TIME DUE at the right instant."""
+        mgr = TaskManager(mock_calendar_manager)
+        mock_calendar_manager.get_calendar.return_value = mock_calendar
+
+        mgr.create_task(
+            calendar_uid="cal-123",
+            summary="Timed task",
+            due=datetime(2026, 6, 21, 9, 30, tzinfo=timezone.utc),
+            all_day=False,
+        )
+
+        ical = self._captured_ical(mock_calendar)
+        due_line = next(line for line in ical.splitlines() if line.startswith("DUE"))
+        # Still a DATE-TIME, not VALUE=DATE; instant preserved (June 21, no shift)
+        assert "VALUE=DATE" not in due_line
+        assert "20260621T093000" in due_line

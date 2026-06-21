@@ -16,7 +16,7 @@ from ..exceptions import (
 )
 from ..logging_config import setup_logging
 from ..models import TaskStatus
-from ..utils import parse_datetime
+from ..utils import _is_date_only, parse_datetime
 from ..validation import InputValidator
 from .base import create_success_response, handle_tool_errors
 
@@ -40,6 +40,14 @@ async def create_task(
         description="Task status (NEEDS-ACTION, IN-PROCESS, COMPLETED, CANCELLED)",
     ),
     related_to: Optional[List[str]] = Field(None, description="List of related component UIDs"),
+    all_day: bool = Field(
+        False,
+        description=(
+            "Create a date-only (all-day) task: the due date is stored as "
+            "DUE;VALUE=DATE (no time, no timezone shift). A bare YYYY-MM-DD due "
+            "string is auto-detected as all-day."
+        ),
+    ),
     account: Optional[str] = Field(None, description="Account alias"),
 ) -> Dict[str, Any]:
     """Create a new task"""
@@ -71,9 +79,15 @@ async def create_task(
                 "request_id": request_id,
             }
 
-        # Parse due date if provided
+        # Parse due date if provided. Effective date-only = explicit all_day
+        # flag OR a bare YYYY-MM-DD due string (auto-detect). parse_datetime
+        # always returns a datetime, so the date-only decision is made here in
+        # the tool layer and threaded to the manager as all_day.
         due_dt = None
+        effective_all_day = all_day
         if due:
+            if _is_date_only(due):
+                effective_all_day = True
             due_dt = parse_datetime(due)
 
         # Validate priority
@@ -107,6 +121,7 @@ async def create_task(
             priority=priority,
             status=task_status,
             related_to=related_to,
+            all_day=effective_all_day,
             account_alias=account,
             request_id=request_id,
         )
