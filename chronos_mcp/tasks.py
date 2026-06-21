@@ -296,11 +296,31 @@ class TaskManager:
         status: Optional[TaskStatus] = None,
         percent_complete: Optional[int] = None,
         related_to: Optional[List[str]] = None,
+        all_day: bool = False,
+        recurrence_rule: Optional[str] = None,
         account_alias: Optional[str] = None,
         request_id: Optional[str] = None,
     ) -> Optional[Task]:
-        """Update an existing task - raises exceptions on failure"""
+        """Update an existing task - raises exceptions on failure.
+
+        Clear conventions (mirroring the existing description/due/related_to
+        semantics where ``None`` means "not provided" and an empty value means
+        "clear"):
+        - ``due=None`` leaves DUE untouched; pass a datetime/date to set it.
+        - ``recurrence_rule=None`` leaves RRULE/DTSTART untouched; a non-empty
+          string sets/replaces them; an empty string ("") clears both.
+        - ``all_day`` only affects the DUE re-emission when ``due`` is provided.
+        """
         request_id = request_id or str(uuid.uuid4())
+
+        # Validate RRULE early if one is being set (mirrors the create path);
+        # an empty string is the "clear" sentinel and skips validation.
+        if recurrence_rule:
+            is_valid, error_msg = validate_rrule(recurrence_rule)
+            if not is_valid:
+                raise EventCreationError(
+                    f"Task {task_uid}", f"Invalid RRULE: {error_msg}", request_id=request_id
+                )
 
         calendar = self.calendars.get_calendar(calendar_uid, account_alias, request_id=request_id)
         if not calendar:
@@ -341,11 +361,23 @@ class TaskManager:
                 elif "DESCRIPTION" in existing_task:
                     del existing_task["DESCRIPTION"]
 
+            # Track the effective DUE value (date for all-day, else datetime)
+            # so a concurrently-updated RRULE can re-anchor DTSTART to it.
+            due_value = None
+            due_updated = False
             if due is not None:
+                due_updated = True
                 if "DUE" in existing_task:
                     del existing_task["DUE"]
                 if due:
-                    existing_task.add("DUE", due)
+                    # Re-emit as a date (VALUE=DATE) for all-day, or a
+                    # (correctly-zoned) datetime otherwise. Supports switching a
+                    # timed task -> date-only AND date-only -> timed.
+                    if all_day:
+                        due_value = due.date() if isinstance(due, datetime) else due
+                    else:
+                        due_value = due
+                    existing_task.add("DUE", due_value)
 
             if priority is not None:
                 if priority and 1 <= priority <= 9:
@@ -370,6 +402,38 @@ class TaskManager:
                 if related_to:
                     for related_uid in related_to:
                         existing_task.add("RELATED-TO", related_uid)
+
+            # Recurrence handling. ``None`` = untouched, "" (empty) = clear,
+            # non-empty = set/replace. RFC 5545 anchors a VTODO's RRULE to
+            # DTSTART, so we keep DTSTART == DUE (same value-type, no DURATION).
+            if recurrence_rule is not None:
+                # Always remove any existing RRULE/DTSTART first so set and
+                # clear both start from a clean slate.
+                if "RRULE" in existing_task:
+                    del existing_task["RRULE"]
+                if "DTSTART" in existing_task:
+                    del existing_task["DTSTART"]
+                if recurrence_rule:
+                    # Anchor DTSTART to the DUE value: the freshly-updated due
+                    # if provided, else the task's current DUE, else
+                    # today-in-default-tz (matching its all_day-ness).
+                    if due_value is not None:
+                        anchor = due_value
+                    elif existing_task.get("due") is not None:
+                        anchor = existing_task.get("due").dt
+                    elif all_day:
+                        anchor = datetime.now(_default_tz()).date()
+                    else:
+                        anchor = datetime.now(_default_tz())
+                    existing_task.add("DTSTART", anchor)
+                    existing_task.add("RRULE", recurrence_rule)
+            elif due_updated and "RRULE" in existing_task:
+                # DUE changed on an already-recurring task and no new rule was
+                # supplied: keep the DTSTART anchor in sync with the new DUE.
+                if "DTSTART" in existing_task:
+                    del existing_task["DTSTART"]
+                if due_value is not None:
+                    existing_task.add("DTSTART", due_value)
 
             # Update last-modified timestamp
             if "LAST-MODIFIED" in existing_task:

@@ -1115,3 +1115,232 @@ class TestCreateTaskRecurrence:
         ical = self._captured_ical(mock_calendar)
         assert any(line.startswith("DTSTART") for line in ical.splitlines())
         assert any(line.startswith("RRULE") for line in ical.splitlines())
+
+
+class TestUpdateTaskDateOnlyAndRecurrence:
+    """Task 4: update_task parity — date-only DUE re-emit, default-tz, RRULE set/clear."""
+
+    @pytest.fixture
+    def mock_calendar_manager(self):
+        manager = Mock(spec=CalendarManager)
+        manager.accounts = Mock()
+        manager.accounts.config = Mock()
+        manager.accounts.config.config = Mock()
+        manager.accounts.config.config.default_account = "test_account"
+        return manager
+
+    @pytest.fixture
+    def mock_calendar(self):
+        calendar = Mock()
+        calendar.event_by_uid = Mock()
+        return calendar
+
+    @staticmethod
+    def _caldav_task(vtodo_lines):
+        """Build a mock CalDAV task whose .data is a VTODO with the given body lines."""
+        body = "".join(line + "\r\n" for line in vtodo_lines)
+        ical = (
+            "BEGIN:VCALENDAR\r\n"
+            "VERSION:2.0\r\n"
+            "BEGIN:VTODO\r\n"
+            "UID:test-task-123\r\n"
+            "SUMMARY:Test Task\r\n"
+            "DTSTAMP:20250101T000000Z\r\n"
+            f"{body}"
+            "END:VTODO\r\n"
+            "END:VCALENDAR\r\n"
+        )
+        task = Mock()
+        task.data = ical
+        task.save = Mock()
+        return task
+
+    @staticmethod
+    def _saved_ical(caldav_task):
+        """The serialized iCal after update_task assigns caldav_task.data then save()s."""
+        assert caldav_task.save.called
+        return caldav_task.data
+
+    def _run(self, mock_calendar_manager, mock_calendar, caldav_task, **kwargs):
+        mgr = TaskManager(mock_calendar_manager)
+        mock_calendar_manager.get_calendar.return_value = mock_calendar
+        mock_calendar.event_by_uid.return_value = caldav_task
+        return mgr.update_task(task_uid="test-task-123", calendar_uid="cal-123", **kwargs)
+
+    # ---- (4a) DUE value-type switching ------------------------------------
+
+    def test_timed_to_date_only(self, mock_calendar_manager, mock_calendar):
+        """Switching a timed task to date-only ⇒ DUE;VALUE=DATE (no T/Z)."""
+        caldav_task = self._caldav_task(["DUE:20260621T140000Z"])
+        self._run(
+            mock_calendar_manager,
+            mock_calendar,
+            caldav_task,
+            due=datetime(2026, 6, 21, 14, 0, tzinfo=timezone.utc),
+            all_day=True,
+        )
+        ical = self._saved_ical(caldav_task)
+        due_line = next(line for line in ical.splitlines() if line.startswith("DUE"))
+        assert "VALUE=DATE:20260621" in due_line
+        assert "T" not in due_line.split(":", 1)[1]
+        assert "Z" not in due_line.split(":", 1)[1]
+
+    def test_date_only_to_timed_in_default_zone(self, mock_calendar_manager, mock_calendar):
+        """date-only → timed ⇒ a DATE-TIME DUE in the default zone (naive input)."""
+        caldav_task = self._caldav_task(["DUE;VALUE=DATE:20260621"])
+        # Naive datetime (as parse_datetime would yield for "2026-06-21T09:30:00"
+        # under the default zone) — here UTC default ⇒ instant preserved.
+        self._run(
+            mock_calendar_manager,
+            mock_calendar,
+            caldav_task,
+            due=datetime(2026, 6, 21, 9, 30, tzinfo=timezone.utc),
+            all_day=False,
+        )
+        ical = self._saved_ical(caldav_task)
+        due_line = next(line for line in ical.splitlines() if line.startswith("DUE"))
+        assert "VALUE=DATE" not in due_line
+        assert "20260621T093000" in due_line
+
+    def test_naive_updated_due_gets_default_tz(self, mock_calendar_manager, mock_calendar):
+        """A naive updated due is stamped with the default zone (NY → instant shifts to UTC)."""
+        import os
+        from chronos_mcp.utils import _resolve_default_tz
+
+        caldav_task = self._caldav_task(["DUE:20260101T000000Z"])
+        _resolve_default_tz.cache_clear()
+        old = os.environ.get("CHRONOS_DEFAULT_TIMEZONE")
+        os.environ["CHRONOS_DEFAULT_TIMEZONE"] = "America/New_York"
+        try:
+            from chronos_mcp.utils import parse_datetime
+
+            due_dt = parse_datetime("2026-06-21T09:30:00")  # naive ⇒ stamped NY
+            self._run(
+                mock_calendar_manager,
+                mock_calendar,
+                caldav_task,
+                due=due_dt,
+                all_day=False,
+            )
+        finally:
+            if old is None:
+                os.environ.pop("CHRONOS_DEFAULT_TIMEZONE", None)
+            else:
+                os.environ["CHRONOS_DEFAULT_TIMEZONE"] = old
+            _resolve_default_tz.cache_clear()
+
+        # Assert on the represented instant (not the literal Z/offset spelling):
+        # re-parse the saved VTODO and compare the DUE moment in UTC.
+        ical = self._saved_ical(caldav_task)
+        cal = iCalendar.from_ical(ical)
+        vtodo = next(c for c in cal.walk() if c.name == "VTODO")
+        due_prop = vtodo.get("due").dt
+        assert due_prop.tzinfo is not None  # aware, in the default zone
+        # 09:30 in America/New_York (EDT, UTC-4) == 13:30 UTC.
+        assert due_prop.astimezone(timezone.utc) == datetime(
+            2026, 6, 21, 13, 30, tzinfo=timezone.utc
+        )
+
+    # ---- (4b) RRULE set / clear + DTSTART anchor --------------------------
+
+    def test_adding_recurrence_sets_rrule_and_dtstart(self, mock_calendar_manager, mock_calendar):
+        """Adding a rule ⇒ RRULE + DTSTART (anchored to the updated DUE)."""
+        caldav_task = self._caldav_task(["DUE:20260622T090000Z"])
+        self._run(
+            mock_calendar_manager,
+            mock_calendar,
+            caldav_task,
+            due=datetime(2026, 6, 22, 9, 0, tzinfo=timezone.utc),
+            recurrence_rule="FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;COUNT=10",
+        )
+        ical = self._saved_ical(caldav_task)
+        assert any(line.startswith("RRULE") for line in ical.splitlines())
+        due_value = next(
+            line.split(":", 1)[1] for line in ical.splitlines() if line.startswith("DUE")
+        )
+        dtstart_value = next(
+            line.split(":", 1)[1] for line in ical.splitlines() if line.startswith("DTSTART")
+        )
+        assert dtstart_value == due_value
+        assert "DURATION" not in ical
+
+    def test_adding_recurrence_anchors_to_existing_due(self, mock_calendar_manager, mock_calendar):
+        """A rule with no new due ⇒ DTSTART anchors to the task's existing DUE."""
+        caldav_task = self._caldav_task(["DUE:20260622T090000Z"])
+        self._run(
+            mock_calendar_manager,
+            mock_calendar,
+            caldav_task,
+            recurrence_rule="FREQ=DAILY;COUNT=5",
+        )
+        ical = self._saved_ical(caldav_task)
+        assert any(line.startswith("RRULE") for line in ical.splitlines())
+        assert any(
+            "20260622T090000" in line for line in ical.splitlines() if line.startswith("DTSTART")
+        )
+
+    def test_clearing_recurrence_removes_rrule_and_dtstart(
+        self, mock_calendar_manager, mock_calendar
+    ):
+        """An empty-string rule ⇒ neither RRULE nor DTSTART remains."""
+        caldav_task = self._caldav_task(
+            ["DUE:20260622T090000Z", "DTSTART:20260622T090000Z", "RRULE:FREQ=DAILY;COUNT=5"]
+        )
+        self._run(
+            mock_calendar_manager,
+            mock_calendar,
+            caldav_task,
+            recurrence_rule="",
+        )
+        ical = self._saved_ical(caldav_task)
+        assert not any(line.startswith("RRULE") for line in ical.splitlines())
+        assert not any(line.startswith("DTSTART") for line in ical.splitlines())
+
+    def test_recurrence_untouched_when_not_provided(self, mock_calendar_manager, mock_calendar):
+        """recurrence_rule=None leaves an existing RRULE/DTSTART intact."""
+        caldav_task = self._caldav_task(
+            ["DUE:20260622T090000Z", "DTSTART:20260622T090000Z", "RRULE:FREQ=DAILY;COUNT=5"]
+        )
+        self._run(
+            mock_calendar_manager,
+            mock_calendar,
+            caldav_task,
+            summary="Renamed",
+        )
+        ical = self._saved_ical(caldav_task)
+        assert any(line.startswith("RRULE") for line in ical.splitlines())
+        assert any(line.startswith("DTSTART") for line in ical.splitlines())
+
+    def test_invalid_rrule_raises(self, mock_calendar_manager, mock_calendar):
+        """An invalid RRULE on update raises EventCreationError (no save)."""
+        caldav_task = self._caldav_task(["DUE:20260622T090000Z"])
+        with pytest.raises(EventCreationError):
+            self._run(
+                mock_calendar_manager,
+                mock_calendar,
+                caldav_task,
+                recurrence_rule="FREQ=NONSENSE;INTERVAL=bad",
+            )
+        caldav_task.save.assert_not_called()
+
+    def test_updating_due_resyncs_existing_dtstart(self, mock_calendar_manager, mock_calendar):
+        """Changing DUE on a recurring task (no new rule) re-anchors DTSTART to the new DUE."""
+        caldav_task = self._caldav_task(
+            ["DUE:20260622T090000Z", "DTSTART:20260622T090000Z", "RRULE:FREQ=DAILY;COUNT=5"]
+        )
+        self._run(
+            mock_calendar_manager,
+            mock_calendar,
+            caldav_task,
+            due=datetime(2026, 6, 25, 9, 0, tzinfo=timezone.utc),
+        )
+        ical = self._saved_ical(caldav_task)
+        due_value = next(
+            line.split(":", 1)[1] for line in ical.splitlines() if line.startswith("DUE")
+        )
+        dtstart_value = next(
+            line.split(":", 1)[1] for line in ical.splitlines() if line.startswith("DTSTART")
+        )
+        assert "20260625T090000" in due_value
+        assert dtstart_value == due_value
+        assert any(line.startswith("RRULE") for line in ical.splitlines())

@@ -1046,3 +1046,151 @@ class TestTaskToolsComprehensive:
             assert "Failed to create task" in result["error"]
         finally:
             _managers.update(original)
+
+    # UPDATE_TASK TOOL TESTS — Task 4 parity (date-only, default-tz, recurrence)
+
+    @pytest.mark.asyncio
+    async def test_update_task_bare_date_autodetects_all_day(self, setup_managers, sample_task):
+        """A bare YYYY-MM-DD due string on update auto-detects all_day=True."""
+        _managers["task_manager"].update_task.return_value = sample_task
+
+        result = await update_task.fn(
+            calendar_uid="cal-123",
+            task_uid="task-123",
+            summary=None,
+            description=None,
+            due="2026-06-21",
+            priority=None,
+            status=None,
+            percent_complete=None,
+            all_day=False,
+            recurrence_rule=None,
+            account=None,
+            request_id=None,
+        )
+
+        assert result["success"] is True
+        _, kwargs = _managers["task_manager"].update_task.call_args
+        assert kwargs["all_day"] is True
+        assert kwargs["due"].date() == datetime(2026, 6, 21).date()
+
+    @pytest.mark.asyncio
+    async def test_update_task_explicit_all_day_threads_flag(self, setup_managers, sample_task):
+        """Explicit all_day=True with a datetime input threads all_day=True."""
+        _managers["task_manager"].update_task.return_value = sample_task
+
+        result = await update_task.fn(
+            calendar_uid="cal-123",
+            task_uid="task-123",
+            summary=None,
+            description=None,
+            due="2026-06-21T15:00:00",
+            priority=None,
+            status=None,
+            percent_complete=None,
+            all_day=True,
+            recurrence_rule=None,
+            account=None,
+            request_id=None,
+        )
+
+        assert result["success"] is True
+        _, kwargs = _managers["task_manager"].update_task.call_args
+        assert kwargs["all_day"] is True
+
+    @pytest.mark.asyncio
+    async def test_update_task_midnight_datetime_stays_timed(self, setup_managers, sample_task):
+        """A ...T00:00:00 input WITHOUT all_day stays timed (heuristic boundary)."""
+        _managers["task_manager"].update_task.return_value = sample_task
+
+        result = await update_task.fn(
+            calendar_uid="cal-123",
+            task_uid="task-123",
+            summary=None,
+            description=None,
+            due="2026-06-21T00:00:00",
+            priority=None,
+            status=None,
+            percent_complete=None,
+            all_day=False,
+            recurrence_rule=None,
+            account=None,
+            request_id=None,
+        )
+
+        assert result["success"] is True
+        _, kwargs = _managers["task_manager"].update_task.call_args
+        assert kwargs["all_day"] is False
+
+    @pytest.mark.asyncio
+    async def test_update_task_threads_recurrence_rule(self, setup_managers, sample_task):
+        """A non-empty recurrence_rule is passed through to the manager unchanged."""
+        _managers["task_manager"].update_task.return_value = sample_task
+
+        result = await update_task.fn(
+            calendar_uid="cal-123",
+            task_uid="task-123",
+            summary=None,
+            description=None,
+            due=None,
+            priority=None,
+            status=None,
+            percent_complete=None,
+            all_day=False,
+            recurrence_rule="FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;COUNT=10",
+            account=None,
+            request_id=None,
+        )
+
+        assert result["success"] is True
+        _, kwargs = _managers["task_manager"].update_task.call_args
+        assert kwargs["recurrence_rule"] == "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;COUNT=10"
+
+    @pytest.mark.asyncio
+    async def test_update_task_clear_recurrence_threads_empty(self, setup_managers, sample_task):
+        """An empty-string recurrence_rule (clear intent) is threaded as-is."""
+        _managers["task_manager"].update_task.return_value = sample_task
+
+        result = await update_task.fn(
+            calendar_uid="cal-123",
+            task_uid="task-123",
+            summary=None,
+            description=None,
+            due=None,
+            priority=None,
+            status=None,
+            percent_complete=None,
+            all_day=False,
+            recurrence_rule="",
+            account=None,
+            request_id=None,
+        )
+
+        assert result["success"] is True
+        _, kwargs = _managers["task_manager"].update_task.call_args
+        assert kwargs["recurrence_rule"] == ""
+
+    @pytest.mark.asyncio
+    async def test_update_task_recurrence_none_not_provided(self, setup_managers, sample_task):
+        """recurrence_rule=None (not provided) is threaded as None (untouched)."""
+        _managers["task_manager"].update_task.return_value = sample_task
+
+        result = await update_task.fn(
+            calendar_uid="cal-123",
+            task_uid="task-123",
+            summary="Renamed",
+            description=None,
+            due=None,
+            priority=None,
+            status=None,
+            percent_complete=None,
+            all_day=False,
+            recurrence_rule=None,
+            account=None,
+            request_id=None,
+        )
+
+        assert result["success"] is True
+        _, kwargs = _managers["task_manager"].update_task.call_args
+        assert kwargs["recurrence_rule"] is None
+        assert kwargs["all_day"] is False

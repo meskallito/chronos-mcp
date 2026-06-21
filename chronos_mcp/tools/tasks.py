@@ -307,6 +307,23 @@ async def update_task(
     percent_complete: Optional[Union[int, str]] = Field(
         None, description="Completion percentage (0-100)"
     ),
+    all_day: bool = Field(
+        False,
+        description=(
+            "When updating the due date, store it as a date-only DUE;VALUE=DATE "
+            "(no time, no timezone shift). A bare YYYY-MM-DD due string is "
+            "auto-detected as all-day. Only affects an updated due date."
+        ),
+    ),
+    recurrence_rule: Optional[str] = Field(
+        None,
+        description=(
+            "RFC 5545 RRULE for a recurring task (e.g. "
+            "'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR'). None leaves recurrence "
+            "untouched; a non-empty rule sets/replaces RRULE (and a matching "
+            "DTSTART anchor); an empty string ('') clears both."
+        ),
+    ),
     account: Optional[str] = Field(None, description="Account alias"),
     request_id: str | None = None,
 ) -> Dict[str, Any]:
@@ -335,10 +352,21 @@ async def update_task(
     if description is not None:
         description = InputValidator.validate_text_field(description, "description")
 
-    # Parse due date if provided
+    # Parse due date if provided. As on the create path, parse_datetime always
+    # returns a datetime, so the date-only decision is made here in the tool
+    # layer (explicit all_day OR a bare YYYY-MM-DD due) and threaded to the
+    # manager as effective_all_day.
     due_dt = None
+    effective_all_day = all_day
     if due is not None:
-        due_dt = parse_datetime(due)
+        if due:
+            if _is_date_only(due):
+                effective_all_day = True
+            due_dt = parse_datetime(due)
+        else:
+            # Empty string ⇒ clear DUE. Pass a non-None falsy sentinel so the
+            # manager's "due is not None" branch runs and deletes DUE.
+            due_dt = ""
 
     # Validate priority
     if priority is not None and not (1 <= priority <= 9):
@@ -368,6 +396,8 @@ async def update_task(
         priority=priority,
         status=status_enum,
         percent_complete=percent_complete,
+        all_day=effective_all_day,
+        recurrence_rule=recurrence_rule,
         account_alias=account,
         request_id=request_id,
     )
