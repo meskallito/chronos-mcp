@@ -42,10 +42,12 @@ class TestTaskToolsComprehensive:
         task.summary = "Test Task"
         task.description = "Test description"
         task.due = datetime(2025, 12, 31, 23, 59, tzinfo=timezone.utc)
+        task.all_day = False
         task.priority = 5
         task.status = TaskStatus.NEEDS_ACTION
         task.percent_complete = 0
         task.related_to = ["related-1", "related-2"]
+        task.recurrence_rule = None
         return task
 
     @pytest.fixture
@@ -498,10 +500,12 @@ class TestTaskToolsComprehensive:
         task.summary = "Test Task"
         task.description = "Test description"
         task.due = None  # No due date
+        task.all_day = False
         task.priority = 5
         task.status = TaskStatus.NEEDS_ACTION
         task.percent_complete = 0
         task.related_to = []
+        task.recurrence_rule = None
 
         _managers["task_manager"].list_tasks.return_value = [task]
 
@@ -1194,3 +1198,148 @@ class TestTaskToolsComprehensive:
         _, kwargs = _managers["task_manager"].update_task.call_args
         assert kwargs["recurrence_rule"] is None
         assert kwargs["all_day"] is False
+
+
+class TestTaskToolResponseSurfacing:
+    """Task 5: create/list/update tool responses surface all_day +
+    recurrence_rule, and render a date-only DUE as a plain YYYY-MM-DD."""
+
+    @pytest.fixture
+    def setup_managers(self):
+        task_manager = Mock()
+        original = _managers.copy()
+        _managers.clear()
+        _managers.update({"task_manager": task_manager})
+        yield task_manager
+        _managers.clear()
+        _managers.update(original)
+
+    @staticmethod
+    def _task(**overrides):
+        from chronos_mcp.models import Task
+
+        defaults = dict(
+            uid="task-123",
+            summary="Test Task",
+            description=None,
+            due=datetime(2026, 6, 21, 0, 0, tzinfo=timezone.utc),
+            all_day=False,
+            priority=None,
+            status=TaskStatus.NEEDS_ACTION,
+            percent_complete=0,
+            related_to=[],
+            recurrence_rule=None,
+            calendar_uid="cal-123",
+            account_alias="test_account",
+        )
+        defaults.update(overrides)
+        return Task(**defaults)
+
+    @pytest.mark.asyncio
+    async def test_create_date_only_lists_back_no_dayshift(self, setup_managers):
+        """A date-only task round-trips to all_day=True on the SAME date in
+        the tool JSON, with DUE rendered as YYYY-MM-DD (no phantom time)."""
+        task_manager = setup_managers
+        all_day_task = self._task(
+            due=datetime(2026, 6, 21, 0, 0, tzinfo=timezone.utc), all_day=True
+        )
+        task_manager.create_task.return_value = all_day_task
+        task_manager.list_tasks.return_value = [all_day_task]
+
+        created = await create_task.fn(
+            calendar_uid="cal-123",
+            summary="Date-only Task",
+            description=None,
+            due="2026-06-21",
+            priority=None,
+            status="NEEDS-ACTION",
+            related_to=None,
+            all_day=True,
+            account=None,
+        )
+        assert created["success"] is True
+        assert created["task"]["all_day"] is True
+        # Plain calendar date — no T00:00:00, no off-by-one.
+        assert created["task"]["due"] == "2026-06-21"
+
+        listed = await list_tasks.fn(calendar_uid="cal-123", status_filter=None, account=None)
+        assert listed["tasks"][0]["all_day"] is True
+        assert listed["tasks"][0]["due"] == "2026-06-21"
+
+    @pytest.mark.asyncio
+    async def test_recurring_task_json_carries_recurrence_rule(self, setup_managers):
+        """A recurring task's tool JSON exposes recurrence_rule."""
+        task_manager = setup_managers
+        recurring = self._task(
+            due=datetime(2026, 6, 21, 9, 0, tzinfo=timezone.utc),
+            recurrence_rule="FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR",
+        )
+        task_manager.create_task.return_value = recurring
+
+        created = await create_task.fn(
+            calendar_uid="cal-123",
+            summary="Recurring Task",
+            description=None,
+            due="2026-06-21T09:00:00Z",
+            priority=None,
+            status="NEEDS-ACTION",
+            related_to=None,
+            all_day=False,
+            recurrence_rule="FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR",
+            account=None,
+        )
+        assert created["task"]["recurrence_rule"] == "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR"
+        assert created["task"]["all_day"] is False
+
+    @pytest.mark.asyncio
+    async def test_timed_task_json_unaffected(self, setup_managers):
+        """A plain timed task: all_day False, recurrence_rule None, DUE a full
+        datetime isoformat (with the time preserved)."""
+        task_manager = setup_managers
+        timed = self._task(due=datetime(2026, 6, 21, 14, 30, tzinfo=timezone.utc))
+        task_manager.create_task.return_value = timed
+
+        created = await create_task.fn(
+            calendar_uid="cal-123",
+            summary="Timed Task",
+            description=None,
+            due="2026-06-21T14:30:00Z",
+            priority=None,
+            status="NEEDS-ACTION",
+            related_to=None,
+            all_day=False,
+            account=None,
+        )
+        assert created["task"]["all_day"] is False
+        assert created["task"]["recurrence_rule"] is None
+        # Full datetime isoformat (time preserved), not a bare date.
+        assert "T14:30:00" in created["task"]["due"]
+
+    @pytest.mark.asyncio
+    async def test_update_response_surfaces_new_fields(self, setup_managers):
+        """update_task's response dict also carries all_day + recurrence_rule."""
+        task_manager = setup_managers
+        updated = self._task(
+            due=datetime(2026, 6, 21, 0, 0, tzinfo=timezone.utc),
+            all_day=True,
+            recurrence_rule="FREQ=DAILY",
+        )
+        task_manager.update_task.return_value = updated
+
+        result = await update_task.fn(
+            calendar_uid="cal-123",
+            task_uid="task-123",
+            summary=None,
+            description=None,
+            due="2026-06-21",
+            priority=None,
+            status=None,
+            percent_complete=None,
+            all_day=True,
+            recurrence_rule="FREQ=DAILY",
+            account=None,
+            request_id=None,
+        )
+        assert result["task"]["all_day"] is True
+        assert result["task"]["due"] == "2026-06-21"
+        assert result["task"]["recurrence_rule"] == "FREQ=DAILY"

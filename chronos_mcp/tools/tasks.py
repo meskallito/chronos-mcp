@@ -15,7 +15,7 @@ from ..exceptions import (
     ValidationError,
 )
 from ..logging_config import setup_logging
-from ..models import TaskStatus
+from ..models import Task, TaskStatus
 from ..utils import _is_date_only, parse_datetime
 from ..validation import InputValidator
 from .base import create_success_response, handle_tool_errors
@@ -24,6 +24,20 @@ logger = setup_logging()
 
 # Module-level managers dictionary for dependency injection
 _managers: Dict[str, Any] = {}
+
+
+def _render_due(task: Task) -> Optional[str]:
+    """Render a task's DUE for the tool response.
+
+    A date-only (all-day) task renders as a plain ``YYYY-MM-DD`` so the agent
+    doesn't see a phantom ``T00:00:00`` time; a timed task keeps its full
+    datetime isoformat.
+    """
+    if task.due is None:
+        return None
+    if task.all_day:
+        return task.due.date().isoformat()
+    return task.due.isoformat()
 
 
 # Task tool functions - defined as standalone functions for importability
@@ -141,11 +155,13 @@ async def create_task(
                 "uid": task.uid,
                 "summary": task.summary,
                 "description": task.description,
-                "due": task.due.isoformat() if task.due else None,
+                "due": _render_due(task),
+                "all_day": task.all_day,
                 "priority": task.priority,
                 "status": task.status.value,
                 "percent_complete": task.percent_complete,
                 "related_to": task.related_to,
+                "recurrence_rule": task.recurrence_rule,
             },
             "request_id": request_id,
         }
@@ -234,11 +250,13 @@ async def list_tasks(
                     "uid": task.uid,
                     "summary": task.summary,
                     "description": task.description,
-                    "due": task.due.isoformat() if task.due else None,
+                    "due": _render_due(task),
+                    "all_day": task.all_day,
                     "priority": task.priority,
                     "status": task.status.value,
                     "percent_complete": task.percent_complete,
                     "related_to": task.related_to,
+                    "recurrence_rule": task.recurrence_rule,
                 }
                 for task in tasks
             ],
@@ -409,11 +427,13 @@ async def update_task(
             "uid": updated_task.uid,
             "summary": updated_task.summary,
             "description": updated_task.description,
-            "due": updated_task.due.isoformat() if updated_task.due else None,
+            "due": _render_due(updated_task),
+            "all_day": updated_task.all_day,
             "priority": updated_task.priority,
             "status": updated_task.status.value,
             "percent_complete": updated_task.percent_complete,
             "related_to": updated_task.related_to,
+            "recurrence_rule": updated_task.recurrence_rule,
         },
     )
 

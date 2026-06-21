@@ -1344,3 +1344,86 @@ class TestUpdateTaskDateOnlyAndRecurrence:
         assert "20260625T090000" in due_value
         assert dtstart_value == due_value
         assert any(line.startswith("RRULE") for line in ical.splitlines())
+
+
+class TestParseCaldavTaskReadPath:
+    """Task 5: read-path round-trip — _parse_caldav_task detects VALUE=DATE
+    DUE (all_day, no UTC day-shift) and surfaces RRULE on the Task model."""
+
+    @pytest.fixture
+    def mock_calendar_manager(self):
+        manager = Mock(spec=CalendarManager)
+        manager.accounts = Mock()
+        manager.accounts.config = Mock()
+        manager.accounts.config.config = Mock()
+        manager.accounts.config.config.default_account = "test_account"
+        return manager
+
+    @staticmethod
+    def _caldav_task(vtodo_lines):
+        body = "".join(line + "\r\n" for line in vtodo_lines)
+        ical = (
+            "BEGIN:VCALENDAR\r\n"
+            "VERSION:2.0\r\n"
+            "BEGIN:VTODO\r\n"
+            "UID:read-task-123\r\n"
+            "SUMMARY:Read Task\r\n"
+            "DTSTAMP:20250101T000000Z\r\n"
+            f"{body}"
+            "END:VTODO\r\n"
+            "END:VCALENDAR\r\n"
+        )
+        task = Mock()
+        task.data = ical
+        return task
+
+    def test_date_only_due_reads_as_all_day_no_dayshift(self, mock_calendar_manager, monkeypatch):
+        """DUE;VALUE=DATE:20260621 ⇒ all_day=True on the SAME calendar date.
+
+        Even in America/New_York (UTC-4 in June), the read path must NOT shift
+        the day back to the 20th (the original day-shift bug).
+        """
+        monkeypatch.setenv("CHRONOS_DEFAULT_TIMEZONE", "America/New_York")
+        mgr = TaskManager(mock_calendar_manager)
+        caldav_task = self._caldav_task(["DUE;VALUE=DATE:20260621"])
+
+        result = mgr._parse_caldav_task(
+            caldav_task, calendar_uid="cal-123", account_alias="test_account"
+        )
+
+        assert result is not None
+        assert result.all_day is True
+        # No off-by-one: the calendar date stays June 21.
+        assert result.due.date().isoformat() == "2026-06-21"
+
+    def test_recurring_task_reads_recurrence_rule(self, mock_calendar_manager):
+        """An RRULE on the stored VTODO is surfaced as recurrence_rule."""
+        mgr = TaskManager(mock_calendar_manager)
+        caldav_task = self._caldav_task(
+            [
+                "DTSTART:20260621T090000Z",
+                "DUE:20260621T100000Z",
+                "RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR",
+            ]
+        )
+        result = mgr._parse_caldav_task(
+            caldav_task, calendar_uid="cal-123", account_alias="test_account"
+        )
+        assert result is not None
+        assert result.recurrence_rule is not None
+        # Stringified the same way as the event read path (str(vRecur(...))).
+        assert "WEEKLY" in result.recurrence_rule
+
+    def test_timed_task_unaffected(self, mock_calendar_manager):
+        """A plain timed DUE stays a datetime, all_day False, recurrence None."""
+        mgr = TaskManager(mock_calendar_manager)
+        caldav_task = self._caldav_task(["DUE:20260621T143000Z"])
+        result = mgr._parse_caldav_task(
+            caldav_task, calendar_uid="cal-123", account_alias="test_account"
+        )
+        assert result is not None
+        assert result.all_day is False
+        assert result.recurrence_rule is None
+        assert result.due is not None
+        assert result.due.hour == 14
+        assert result.due.minute == 30

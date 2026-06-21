@@ -3,7 +3,7 @@ Task operations for Chronos MCP
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 from typing import List, Optional
 
 import caldav  # type: ignore[import-untyped,import-not-found]
@@ -515,11 +515,30 @@ class TaskManager:
                     # Parse date/time values
                     due_dt = None
                     completed_dt = None
+                    all_day = False
 
-                    if component.get("due"):
-                        due_dt = ical_to_datetime(component.get("due"))
+                    # Detect a date-only DUE on the RAW property (mirroring the
+                    # event read path in events.py) BEFORE ical_to_datetime
+                    # flattens a date to midnight-UTC — the read-side of the
+                    # original day-shift bug.
+                    due_prop = component.get("due")
+                    if due_prop is not None:
+                        # VALUE=DATE → ``.dt`` is a ``date`` with no ``hour``.
+                        is_date = hasattr(due_prop, "dt") and not hasattr(due_prop.dt, "hour")
+                        if is_date:
+                            all_day = True
+                            # Midnight in the default zone, NOT UTC, so callers
+                            # formatting ``due.date()`` get the correct day.
+                            due_dt = datetime.combine(due_prop.dt, time.min, tzinfo=_default_tz())
+                        else:
+                            due_dt = ical_to_datetime(due_prop)
                     if component.get("completed"):
                         completed_dt = ical_to_datetime(component.get("completed"))
+
+                    # Surface a recurrence rule (stringified, mirroring events).
+                    recurrence_rule = (
+                        str(component.get("rrule", "")) if component.get("rrule") else None
+                    )
 
                     # Parse priority
                     priority = None
@@ -564,11 +583,13 @@ class TaskManager:
                             else None
                         ),
                         due=due_dt,
+                        all_day=all_day,
                         completed=completed_dt,
                         priority=priority,
                         status=status,
                         percent_complete=percent_complete,
                         related_to=related_to,
+                        recurrence_rule=recurrence_rule,
                         calendar_uid=calendar_uid,
                         account_alias=account_alias or self._get_default_account() or "default",
                     )
