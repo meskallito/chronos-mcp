@@ -1345,6 +1345,66 @@ class TestUpdateTaskDateOnlyAndRecurrence:
         assert dtstart_value == due_value
         assert any(line.startswith("RRULE") for line in ical.splitlines())
 
+    def test_clearing_due_on_recurring_task_keeps_dtstart_anchor(
+        self, mock_calendar_manager, mock_calendar
+    ):
+        """Clearing DUE on a still-recurring task must NOT leave a dangling RRULE.
+
+        Regression: previously the DTSTART-resync branch deleted DTSTART and
+        re-added nothing (because the cleared DUE has no value), producing an
+        RRULE with no anchor (an undefined VTODO). A recurring task must always
+        retain a valid DTSTART.
+        """
+        caldav_task = self._caldav_task(
+            ["DUE:20260622T090000Z", "DTSTART:20260622T090000Z", "RRULE:FREQ=DAILY;COUNT=5"]
+        )
+        # due="" is the tool-layer "clear DUE" sentinel; recurrence_rule omitted.
+        self._run(
+            mock_calendar_manager,
+            mock_calendar,
+            caldav_task,
+            due="",
+        )
+        ical = self._saved_ical(caldav_task)
+        lines = ical.splitlines()
+        # DUE is gone, but RRULE survives and STILL has a DTSTART anchor.
+        assert not any(line.startswith("DUE") for line in lines)
+        assert any(line.startswith("RRULE") for line in lines)
+        assert any(line.startswith("DTSTART") for line in lines)
+
+    def test_update_due_without_all_day_preserves_date_only(
+        self, mock_calendar_manager, mock_calendar
+    ):
+        """Tri-state: updating a date-only task's DUE WITHOUT all_day keeps it
+        date-only (VALUE=DATE), instead of silently converting it to a timed
+        DATE-TIME."""
+        caldav_task = self._caldav_task(["DUE;VALUE=DATE:20260621"])
+        # all_day omitted (=> None => preserve existing value-type).
+        self._run(
+            mock_calendar_manager,
+            mock_calendar,
+            caldav_task,
+            due=datetime(2026, 6, 25, 0, 0, tzinfo=timezone.utc),
+        )
+        ical = self._saved_ical(caldav_task)
+        due_line = next(line for line in ical.splitlines() if line.startswith("DUE"))
+        assert "VALUE=DATE:20260625" in due_line
+        assert "T" not in due_line.split(":", 1)[1]
+
+    def test_update_due_without_all_day_preserves_timed(self, mock_calendar_manager, mock_calendar):
+        """Tri-state: updating a timed task's DUE WITHOUT all_day keeps it timed."""
+        caldav_task = self._caldav_task(["DUE:20260621T140000Z"])
+        self._run(
+            mock_calendar_manager,
+            mock_calendar,
+            caldav_task,
+            due=datetime(2026, 6, 25, 9, 30, tzinfo=timezone.utc),
+        )
+        ical = self._saved_ical(caldav_task)
+        due_line = next(line for line in ical.splitlines() if line.startswith("DUE"))
+        assert "VALUE=DATE" not in due_line
+        assert "20260625T093000" in due_line
+
 
 class TestParseCaldavTaskReadPath:
     """Task 5: read-path round-trip — _parse_caldav_task detects VALUE=DATE
@@ -1380,10 +1440,17 @@ class TestParseCaldavTaskReadPath:
     def test_date_only_due_reads_as_all_day_no_dayshift(self, mock_calendar_manager, monkeypatch):
         """DUE;VALUE=DATE:20260621 ⇒ all_day=True on the SAME calendar date.
 
-        Even in America/New_York (UTC-4 in June), the read path must NOT shift
-        the day back to the 20th (the original day-shift bug).
+        In America/New_York (UTC-4 in June) the stored datetime MUST be midnight
+        in the NY zone, NOT midnight-UTC. Under the old ``tzinfo=timezone.utc``
+        combine, ``due.astimezone(NY).date()`` would shift back to the 20th —
+        this test fails against that bug and passes against the default-zone fix.
         """
+        from zoneinfo import ZoneInfo
+
         monkeypatch.setenv("CHRONOS_DEFAULT_TIMEZONE", "America/New_York")
+        from chronos_mcp.utils import _resolve_default_tz
+
+        _resolve_default_tz.cache_clear()
         mgr = TaskManager(mock_calendar_manager)
         caldav_task = self._caldav_task(["DUE;VALUE=DATE:20260621"])
 
@@ -1393,8 +1460,12 @@ class TestParseCaldavTaskReadPath:
 
         assert result is not None
         assert result.all_day is True
-        # No off-by-one: the calendar date stays June 21.
-        assert result.due.date().isoformat() == "2026-06-21"
+        # The DUE is anchored at NY-midnight (UTC offset -04:00 in June), NOT UTC.
+        ny = ZoneInfo("America/New_York")
+        assert result.due.utcoffset() == ny.utcoffset(result.due.replace(tzinfo=None))
+        # No off-by-one: viewing the instant in NY keeps the calendar day June 21.
+        # Under the old UTC combine this astimezone(NY) would render June 20.
+        assert result.due.astimezone(ny).date().isoformat() == "2026-06-21"
 
     def test_recurring_task_reads_recurrence_rule(self, mock_calendar_manager):
         """An RRULE on the stored VTODO is surfaced as recurrence_rule."""
@@ -1411,8 +1482,11 @@ class TestParseCaldavTaskReadPath:
         )
         assert result is not None
         assert result.recurrence_rule is not None
-        # Stringified the same way as the event read path (str(vRecur(...))).
-        assert "WEEKLY" in result.recurrence_rule
+        # MUST be a clean, round-trippable RFC 5545 RRULE string, NOT the
+        # icalendar ``vRecur({...})`` Python repr produced by ``str()``.
+        assert "vRecur" not in result.recurrence_rule
+        assert result.recurrence_rule.startswith("FREQ=WEEKLY")
+        assert "BYDAY=MO,TU,WE,TH,FR" in result.recurrence_rule
 
     def test_timed_task_unaffected(self, mock_calendar_manager):
         """A plain timed DUE stays a datetime, all_day False, recurrence None."""

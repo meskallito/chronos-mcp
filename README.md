@@ -49,6 +49,8 @@ Chronos MCP provides comprehensive support for CalDAV tasks:
   `RRULE` anchored to `DTSTART`
 - **Timezone-aware**: naive datetimes are interpreted in `CHRONOS_DEFAULT_TIMEZONE` (see
   Configuration), not forced to UTC
+- **Response fields**: `create_task`, `list_tasks`, and `update_task` responses include
+  `all_day` (bool) and `recurrence_rule` (a clean RFC 5545 `RRULE` string, or `null`) per task
 - **Track progress** with percentage completion (0-100%)
 - **Manage status**: NEEDS-ACTION, IN-PROCESS, COMPLETED, CANCELLED
 - **Create subtasks** using related_to relationships

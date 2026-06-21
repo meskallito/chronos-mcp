@@ -15,12 +15,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   anchored to `DTSTART` on a VTODO). An RRULE must include a terminator (`COUNT` or `UNTIL`).
 - **`CHRONOS_DEFAULT_TIMEZONE`** env var (IANA name, default `UTC`) selecting the zone used to
   interpret naive datetimes.
+- **Task response fields**: `create_task`, `list_tasks`, and `update_task` tool responses now
+  always include `all_day` (bool) and `recurrence_rule` (a clean RFC 5545 `RRULE` string, or
+  `null`) for each task.
+
+### Changed
+- **`update_task` `all_day` is now tri-state** (`Optional[bool]`): `null` (default) leaves the
+  existing due's date-vs-datetime value-type unchanged, `true` forces a date-only `DUE;VALUE=DATE`,
+  `false` forces a timed `DATE-TIME`. Previously it defaulted to `false`, silently converting a
+  date-only task's due to a timed `DATE-TIME` when the due was updated without re-passing `all_day`.
 
 ### Fixed
 - **Timezone correctness for tasks**: naive datetimes are now interpreted in
   `CHRONOS_DEFAULT_TIMEZONE` instead of being force-stamped UTC, so a date no longer shifts a day
   for non-UTC clients. The read path detects `VALUE=DATE` dues (round-tripping `all_day` and the
   calendar day) and surfaces `RRULE`.
+- **`recurrence_rule` read serialization**: the read path now serializes a recurrence via
+  `vRecur.to_ical()` (yielding e.g. `FREQ=WEEKLY;BYDAY=MO,TU;COUNT=10`) instead of the
+  non-round-trippable `vRecur({...})` Python repr, so a listed recurring task's `recurrence_rule`
+  can be fed straight back into `create_task`/`update_task` (applies to both tasks and events).
+- **Recurring-task anchor on due clear**: clearing the `DUE` of a still-recurring task no longer
+  strips its `DTSTART`, which previously left a dangling `RRULE` with no anchor (an undefined
+  VTODO); it now re-anchors to today in the default zone.
 
 ## [2.1.0] - 2026-05-19
 

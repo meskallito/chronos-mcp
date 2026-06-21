@@ -14,6 +14,23 @@ from chronos_mcp.config import ConfigManager
 from chronos_mcp.models import Account, Calendar, Event
 
 
+@pytest.fixture(autouse=True)
+def _reset_default_tz(monkeypatch):
+    """Keep the cached default-timezone resolution order-independent.
+
+    ``_resolve_default_tz`` is ``lru_cache``d and reads ``CHRONOS_DEFAULT_TIMEZONE``
+    once. Tests that set a non-UTC zone (e.g. ``America/New_York``) would
+    otherwise leak that cached zone into later tests. Clear the cache and drop
+    the env var before AND after every test so order can't change outcomes.
+    """
+    from chronos_mcp.utils import _resolve_default_tz
+
+    monkeypatch.delenv("CHRONOS_DEFAULT_TIMEZONE", raising=False)
+    _resolve_default_tz.cache_clear()
+    yield
+    _resolve_default_tz.cache_clear()
+
+
 @pytest.fixture
 def temp_config_dir():
     """Create temporary config directory"""

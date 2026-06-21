@@ -296,7 +296,7 @@ class TaskManager:
         status: Optional[TaskStatus] = None,
         percent_complete: Optional[int] = None,
         related_to: Optional[List[str]] = None,
-        all_day: bool = False,
+        all_day: Optional[bool] = None,
         recurrence_rule: Optional[str] = None,
         account_alias: Optional[str] = None,
         request_id: Optional[str] = None,
@@ -309,7 +309,10 @@ class TaskManager:
         - ``due=None`` leaves DUE untouched; pass a datetime/date to set it.
         - ``recurrence_rule=None`` leaves RRULE/DTSTART untouched; a non-empty
           string sets/replaces them; an empty string ("") clears both.
-        - ``all_day`` only affects the DUE re-emission when ``due`` is provided.
+        - ``all_day`` is tri-state and only affects the DUE re-emission when a
+          new ``due`` is provided: ``None`` leaves the all-day-ness unchanged
+          (preserving the existing DUE's DATE-vs-DATE-TIME value-type), ``True``
+          forces a date-only DUE;VALUE=DATE, ``False`` forces a timed DATE-TIME.
         """
         request_id = request_id or str(uuid.uuid4())
 
@@ -367,13 +370,21 @@ class TaskManager:
             due_updated = False
             if due is not None:
                 due_updated = True
+                # Detect the existing DUE's value-type BEFORE deleting it so a
+                # tri-state ``all_day=None`` can preserve date-only-ness.
+                existing_due_is_date = existing_task.get("due") is not None and not hasattr(
+                    existing_task.get("due").dt, "hour"
+                )
                 if "DUE" in existing_task:
                     del existing_task["DUE"]
                 if due:
+                    # Resolve the effective all-day-ness: ``None`` preserves the
+                    # existing DUE value-type, otherwise honour the explicit flag.
+                    effective_all_day = existing_due_is_date if all_day is None else all_day
                     # Re-emit as a date (VALUE=DATE) for all-day, or a
                     # (correctly-zoned) datetime otherwise. Supports switching a
                     # timed task -> date-only AND date-only -> timed.
-                    if all_day:
+                    if effective_all_day:
                         due_value = due.date() if isinstance(due, datetime) else due
                     else:
                         due_value = due
@@ -430,10 +441,25 @@ class TaskManager:
             elif due_updated and "RRULE" in existing_task:
                 # DUE changed on an already-recurring task and no new rule was
                 # supplied: keep the DTSTART anchor in sync with the new DUE.
+                # A recurring VTODO MUST retain a DTSTART anchor (RFC 5545), so
+                # never strip it to nothing — if the DUE was *cleared*
+                # (due_value is None), re-anchor to today-in-default-tz instead
+                # of leaving a dangling RRULE.
+                existing_anchor_is_date = existing_task.get("dtstart") is not None and not hasattr(
+                    existing_task.get("dtstart").dt, "hour"
+                )
                 if "DTSTART" in existing_task:
                     del existing_task["DTSTART"]
                 if due_value is not None:
                     existing_task.add("DTSTART", due_value)
+                else:
+                    # DUE cleared: re-anchor, matching the prior DTSTART's
+                    # date-vs-datetime value-type so an all-day recurrence stays
+                    # all-day.
+                    if existing_anchor_is_date:
+                        existing_task.add("DTSTART", datetime.now(_default_tz()).date())
+                    else:
+                        existing_task.add("DTSTART", datetime.now(_default_tz()))
 
             # Update last-modified timestamp
             if "LAST-MODIFIED" in existing_task:
@@ -535,9 +561,13 @@ class TaskManager:
                     if component.get("completed"):
                         completed_dt = ical_to_datetime(component.get("completed"))
 
-                    # Surface a recurrence rule (stringified, mirroring events).
+                    # Surface a recurrence rule as a clean RFC 5545 RRULE string
+                    # (e.g. ``FREQ=WEEKLY;BYDAY=MO,TU;COUNT=10``) so it can be fed
+                    # straight back into create/update. ``str()`` on the icalendar
+                    # ``vRecur`` yields its Python repr, which is NOT round-trippable.
+                    rrule_prop = component.get("rrule")
                     recurrence_rule = (
-                        str(component.get("rrule", "")) if component.get("rrule") else None
+                        rrule_prop.to_ical().decode() if rrule_prop is not None else None
                     )
 
                     # Parse priority

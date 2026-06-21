@@ -282,7 +282,9 @@ class EventManager:
                         calendar_uid=calendar_uid,
                         account_alias=account_alias or self._get_default_account() or "default",
                         recurrence_rule=(
-                            str(component.get("rrule", "")) if component.get("rrule") else None
+                            component.get("rrule").to_ical().decode()
+                            if component.get("rrule") is not None
+                            else None
                         ),
                     )
 

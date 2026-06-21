@@ -66,8 +66,10 @@ async def create_task(
         None,
         description=(
             "RFC 5545 RRULE for a recurring task (e.g. "
-            "'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR'). When set, a DTSTART anchor is "
-            "added (matching the due date/time, or today in the default zone)."
+            "'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;COUNT=20'). A COUNT or UNTIL "
+            "terminator is REQUIRED (unbounded rules are rejected). When set, a "
+            "DTSTART anchor is added (matching the due date/time, or today in "
+            "the default zone)."
         ),
     ),
     account: Optional[str] = Field(None, description="Account alias"),
@@ -325,21 +327,24 @@ async def update_task(
     percent_complete: Optional[Union[int, str]] = Field(
         None, description="Completion percentage (0-100)"
     ),
-    all_day: bool = Field(
-        False,
+    all_day: Optional[bool] = Field(
+        None,
         description=(
-            "When updating the due date, store it as a date-only DUE;VALUE=DATE "
-            "(no time, no timezone shift). A bare YYYY-MM-DD due string is "
-            "auto-detected as all-day. Only affects an updated due date."
+            "Tri-state, only affects an updated due date. None (default) leaves "
+            "the task's existing all-day-ness unchanged; True stores the new due "
+            "as a date-only DUE;VALUE=DATE (no time, no timezone shift); False "
+            "forces a timed DATE-TIME. A bare YYYY-MM-DD due string is "
+            "auto-detected as all-day."
         ),
     ),
     recurrence_rule: Optional[str] = Field(
         None,
         description=(
             "RFC 5545 RRULE for a recurring task (e.g. "
-            "'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR'). None leaves recurrence "
-            "untouched; a non-empty rule sets/replaces RRULE (and a matching "
-            "DTSTART anchor); an empty string ('') clears both."
+            "'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;COUNT=20'). A COUNT or UNTIL "
+            "terminator is REQUIRED (unbounded rules are rejected). None leaves "
+            "recurrence untouched; a non-empty rule sets/replaces RRULE (and a "
+            "matching DTSTART anchor); an empty string ('') clears both."
         ),
     ),
     account: Optional[str] = Field(None, description="Account alias"),
@@ -375,6 +380,9 @@ async def update_task(
     # layer (explicit all_day OR a bare YYYY-MM-DD due) and threaded to the
     # manager as effective_all_day.
     due_dt = None
+    # Tri-state: None means "leave all-day-ness unchanged" — pass it straight
+    # through so the manager preserves the existing DUE value-type. A bare
+    # YYYY-MM-DD due string still upgrades to all_day=True.
     effective_all_day = all_day
     if due is not None:
         if due:

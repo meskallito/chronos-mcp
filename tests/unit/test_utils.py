@@ -10,6 +10,7 @@ import pytz
 
 from chronos_mcp.utils import (
     _default_tz,
+    _is_date_only,
     _resolve_default_tz,
     create_ical_event,
     datetime_to_ical,
@@ -49,6 +50,36 @@ class TestDefaultTimezone:
             "CHRONOS_DEFAULT_TIMEZONE" in rec.message and "Not/AZone" in rec.message
             for rec in caplog.records
         )
+
+
+class TestIsDateOnly:
+    """Test the bare-YYYY-MM-DD all-day auto-detection heuristic."""
+
+    @pytest.mark.parametrize(
+        "value",
+        ["2026-06-21", " 2026-06-21 ", "2026-12-01"],
+    )
+    def test_bare_date_is_date_only(self, value):
+        assert _is_date_only(value) is True
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "2026-06-21T00:00:00",  # midnight datetime: explicit all_day, not heuristic
+            "2026-06-21T09:30:00",
+            "2026-06-21 09:30",
+            "09:30",
+            "not-a-date",
+            "20260621",  # no dashes ⇒ not matched by %Y-%m-%d
+            "",
+        ],
+    )
+    def test_non_bare_date_is_not_date_only(self, value):
+        assert _is_date_only(value) is False
+
+    def test_non_string_is_not_date_only(self):
+        assert _is_date_only(None) is False  # type: ignore[arg-type]
+        assert _is_date_only(datetime(2026, 6, 21)) is False  # type: ignore[arg-type]
 
 
 class TestParseDatetime:

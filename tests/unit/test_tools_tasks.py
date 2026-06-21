@@ -1236,13 +1236,44 @@ class TestTaskToolResponseSurfacing:
         return Task(**defaults)
 
     @pytest.mark.asyncio
-    async def test_create_date_only_lists_back_no_dayshift(self, setup_managers):
-        """A date-only task round-trips to all_day=True on the SAME date in
-        the tool JSON, with DUE rendered as YYYY-MM-DD (no phantom time)."""
-        task_manager = setup_managers
-        all_day_task = self._task(
-            due=datetime(2026, 6, 21, 0, 0, tzinfo=timezone.utc), all_day=True
+    async def test_create_date_only_lists_back_no_dayshift(self, setup_managers, monkeypatch):
+        """A date-only task round-trips to all_day=True on the SAME date in the
+        tool JSON, with DUE rendered as YYYY-MM-DD (no phantom time).
+
+        The manager return value is produced by the REAL read path under
+        America/New_York so the tool JSON genuinely depends on the default-zone
+        combine fix: under the old ``tzinfo=timezone.utc`` combine the parsed
+        ``due`` (NY-midnight) would instead be UTC-midnight and shift the NY
+        calendar day back to June 20.
+        """
+        from zoneinfo import ZoneInfo
+
+        from chronos_mcp.tasks import TaskManager
+        from chronos_mcp.utils import _resolve_default_tz
+
+        monkeypatch.setenv("CHRONOS_DEFAULT_TIMEZONE", "America/New_York")
+        _resolve_default_tz.cache_clear()
+
+        # Parse a real DUE;VALUE=DATE VTODO through the actual read path.
+        ical = (
+            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VTODO\r\n"
+            "UID:task-123\r\nSUMMARY:Date-only Task\r\n"
+            "DTSTAMP:20250101T000000Z\r\nDUE;VALUE=DATE:20260621\r\n"
+            "END:VTODO\r\nEND:VCALENDAR\r\n"
         )
+        caldav_task = Mock()
+        caldav_task.data = ical
+        real_mgr = TaskManager(Mock())
+        all_day_task = real_mgr._parse_caldav_task(
+            caldav_task, calendar_uid="cal-123", account_alias="test_account"
+        )
+        assert all_day_task.all_day is True
+        # The parsed instant lands on June 21 when viewed in NY (fails under the
+        # old UTC combine, which would render June 20).
+        ny = ZoneInfo("America/New_York")
+        assert all_day_task.due.astimezone(ny).date().isoformat() == "2026-06-21"
+
+        task_manager = setup_managers
         task_manager.create_task.return_value = all_day_task
         task_manager.list_tasks.return_value = [all_day_task]
 
