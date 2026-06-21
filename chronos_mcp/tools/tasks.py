@@ -48,6 +48,14 @@ async def create_task(
             "string is auto-detected as all-day."
         ),
     ),
+    recurrence_rule: Optional[str] = Field(
+        None,
+        description=(
+            "RFC 5545 RRULE for a recurring task (e.g. "
+            "'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR'). When set, a DTSTART anchor is "
+            "added (matching the due date/time, or today in the default zone)."
+        ),
+    ),
     account: Optional[str] = Field(None, description="Account alias"),
 ) -> Dict[str, Any]:
     """Create a new task"""
@@ -122,6 +130,7 @@ async def create_task(
             status=task_status,
             related_to=related_to,
             all_day=effective_all_day,
+            recurrence_rule=recurrence_rule,
             account_alias=account,
             request_id=request_id,
         )

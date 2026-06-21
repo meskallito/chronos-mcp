@@ -168,6 +168,51 @@ class TestTaskToolsComprehensive:
         assert kwargs["all_day"] is False
 
     @pytest.mark.asyncio
+    async def test_create_task_threads_recurrence_rule(self, setup_managers, sample_task):
+        """recurrence_rule is passed through to the manager unchanged."""
+        _managers["task_manager"].create_task.return_value = sample_task
+
+        result = await create_task.fn(
+            calendar_uid="cal-123",
+            summary="Weekday Task",
+            description=None,
+            due="2026-06-22",
+            priority=None,
+            status="NEEDS-ACTION",
+            related_to=None,
+            all_day=False,
+            recurrence_rule="FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;COUNT=10",
+            account=None,
+        )
+
+        assert result["success"] is True
+        _, kwargs = _managers["task_manager"].create_task.call_args
+        assert kwargs["recurrence_rule"] == "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;COUNT=10"
+
+    @pytest.mark.asyncio
+    async def test_create_task_invalid_rrule_returns_error(self, setup_managers, sample_task):
+        """An invalid RRULE (manager raises EventCreationError) ⇒ success=False, no task."""
+        _managers["task_manager"].create_task.side_effect = EventCreationError(
+            "Weekday Task", "Invalid RRULE: bad"
+        )
+
+        result = await create_task.fn(
+            calendar_uid="cal-123",
+            summary="Weekday Task",
+            description=None,
+            due="2026-06-22",
+            priority=None,
+            status="NEEDS-ACTION",
+            related_to=None,
+            all_day=False,
+            recurrence_rule="FREQ=NONSENSE;INTERVAL=bad",
+            account=None,
+        )
+
+        assert result["success"] is False
+        assert "task" not in result
+
+    @pytest.mark.asyncio
     async def test_create_task_priority_string_conversion(self, setup_managers, sample_task):
         """Test create_task converts string priority to int"""
         _managers["task_manager"].create_task.return_value = sample_task

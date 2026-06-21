@@ -22,7 +22,7 @@ from .exceptions import (
 )
 from .logging_config import setup_logging
 from .models import Task, TaskStatus
-from .utils import ical_to_datetime
+from .utils import _default_tz, ical_to_datetime, validate_rrule
 
 logger = setup_logging()
 
@@ -49,6 +49,7 @@ class TaskManager:
         status: TaskStatus = TaskStatus.NEEDS_ACTION,
         related_to: Optional[List[str]] = None,
         all_day: bool = False,
+        recurrence_rule: Optional[str] = None,
         account_alias: Optional[str] = None,
         request_id: Optional[str] = None,
     ) -> Optional[Task]:
@@ -60,6 +61,14 @@ class TaskManager:
             raise CalendarNotFoundError(calendar_uid, account_alias, request_id=request_id)
 
         try:
+            # Validate RRULE if provided (mirrors the event path)
+            if recurrence_rule:
+                is_valid, error_msg = validate_rrule(recurrence_rule)
+                if not is_valid:
+                    raise EventCreationError(
+                        summary, f"Invalid RRULE: {error_msg}", request_id=request_id
+                    )
+
             cal = iCalendar()
             task = iTodo()
 
@@ -72,13 +81,29 @@ class TaskManager:
 
             if description:
                 task.add("description", description)
+            # Compute the DUE value (a date for all-day, else the datetime) so it
+            # can also be reused as the RRULE DTSTART anchor with a matching value-type.
+            due_value = None
             if due:
                 if all_day:
                     # Emit DUE;VALUE=DATE:YYYYMMDD (no time, no UTC day-shift)
                     due_value = due.date() if isinstance(due, datetime) else due
-                    task.add("due", due_value)
                 else:
-                    task.add("due", due)
+                    due_value = due
+                task.add("due", due_value)
+            if recurrence_rule:
+                # RFC 5545: a VTODO RRULE anchors to DTSTART. Anchor to the DUE
+                # value (same value-type as DUE so DTSTART == DUE), or to
+                # today-in-default-tz when no due is provided. Never emit a
+                # DURATION (a VTODO must not carry both DUE and DURATION).
+                if due_value is not None:
+                    anchor = due_value
+                elif all_day:
+                    anchor = datetime.now(_default_tz()).date()
+                else:
+                    anchor = datetime.now(_default_tz())
+                task.add("dtstart", anchor)
+                task.add("rrule", recurrence_rule)
             if priority is not None and 1 <= priority <= 9:
                 task.add("priority", priority)
             task.add("status", status.value)

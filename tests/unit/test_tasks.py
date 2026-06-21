@@ -992,3 +992,126 @@ class TestCreateTaskDateOnly:
         # Still a DATE-TIME, not VALUE=DATE; instant preserved (June 21, no shift)
         assert "VALUE=DATE" not in due_line
         assert "20260621T093000" in due_line
+
+
+class TestCreateTaskRecurrence:
+    """Test recurring task creation (RRULE + DTSTART anchor)."""
+
+    @pytest.fixture
+    def mock_calendar_manager(self):
+        manager = Mock(spec=CalendarManager)
+        manager.accounts = Mock()
+        manager.accounts.config = Mock()
+        manager.accounts.config.config = Mock()
+        manager.accounts.config.config.default_account = "test_account"
+        return manager
+
+    @pytest.fixture
+    def mock_calendar(self):
+        calendar = Mock()
+        calendar.save_todo = Mock()
+        calendar.save_event = Mock()
+        return calendar
+
+    @staticmethod
+    def _captured_ical(mock_calendar):
+        assert mock_calendar.save_todo.called
+        return mock_calendar.save_todo.call_args[0][0]
+
+    def test_recurring_task_emits_rrule_and_dtstart(self, mock_calendar_manager, mock_calendar):
+        """A valid weekday RRULE ⇒ an RRULE line + a DTSTART anchor present."""
+        mgr = TaskManager(mock_calendar_manager)
+        mock_calendar_manager.get_calendar.return_value = mock_calendar
+
+        mgr.create_task(
+            calendar_uid="cal-123",
+            summary="Weekday task",
+            due=datetime(2026, 6, 22, 9, 0, tzinfo=timezone.utc),
+            recurrence_rule="FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;COUNT=10",
+        )
+
+        ical = self._captured_ical(mock_calendar)
+        rrule_line = next(line for line in ical.splitlines() if line.startswith("RRULE"))
+        assert "FREQ=WEEKLY" in rrule_line
+        assert "BYDAY=MO,TU,WE,TH,FR" in rrule_line
+        assert any(line.startswith("DTSTART") for line in ical.splitlines())
+
+    def test_recurring_task_dtstart_equals_due_no_duration(
+        self, mock_calendar_manager, mock_calendar
+    ):
+        """RFC-validity: DTSTART == DUE (so DUE >= DTSTART) and no DURATION emitted."""
+        mgr = TaskManager(mock_calendar_manager)
+        mock_calendar_manager.get_calendar.return_value = mock_calendar
+
+        mgr.create_task(
+            calendar_uid="cal-123",
+            summary="Weekday task",
+            due=datetime(2026, 6, 22, 9, 0, tzinfo=timezone.utc),
+            recurrence_rule="FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;COUNT=10",
+        )
+
+        ical = self._captured_ical(mock_calendar)
+        due_value = next(
+            line.split(":", 1)[1] for line in ical.splitlines() if line.startswith("DUE")
+        )
+        dtstart_value = next(
+            line.split(":", 1)[1] for line in ical.splitlines() if line.startswith("DTSTART")
+        )
+        assert dtstart_value == due_value
+        assert "DURATION" not in ical
+
+    def test_recurring_task_invalid_rrule_raises_no_save(
+        self, mock_calendar_manager, mock_calendar
+    ):
+        """An invalid RRULE raises EventCreationError and never saves the task."""
+        mgr = TaskManager(mock_calendar_manager)
+        mock_calendar_manager.get_calendar.return_value = mock_calendar
+
+        with pytest.raises(EventCreationError):
+            mgr.create_task(
+                calendar_uid="cal-123",
+                summary="Bad recurring task",
+                due=datetime(2026, 6, 22, 9, 0, tzinfo=timezone.utc),
+                recurrence_rule="FREQ=NONSENSE;INTERVAL=bad",
+            )
+
+        mock_calendar.save_todo.assert_not_called()
+        mock_calendar.save_event.assert_not_called()
+
+    def test_recurring_date_only_keeps_value_date_on_both(
+        self, mock_calendar_manager, mock_calendar
+    ):
+        """A date-only recurring task keeps VALUE=DATE on BOTH DTSTART and DUE."""
+        mgr = TaskManager(mock_calendar_manager)
+        mock_calendar_manager.get_calendar.return_value = mock_calendar
+
+        mgr.create_task(
+            calendar_uid="cal-123",
+            summary="Date-only recurring task",
+            due=datetime(2026, 6, 21, 0, 0, tzinfo=timezone.utc),
+            all_day=True,
+            recurrence_rule="FREQ=DAILY;COUNT=30",
+        )
+
+        ical = self._captured_ical(mock_calendar)
+        due_line = next(line for line in ical.splitlines() if line.startswith("DUE"))
+        dtstart_line = next(line for line in ical.splitlines() if line.startswith("DTSTART"))
+        assert "VALUE=DATE:20260621" in due_line
+        assert "VALUE=DATE:20260621" in dtstart_line
+        assert "T" not in due_line.split(":", 1)[1]
+        assert "T" not in dtstart_line.split(":", 1)[1]
+
+    def test_recurring_task_no_due_anchors_to_today(self, mock_calendar_manager, mock_calendar):
+        """No due provided ⇒ DTSTART anchors to today-in-default-tz; RRULE present."""
+        mgr = TaskManager(mock_calendar_manager)
+        mock_calendar_manager.get_calendar.return_value = mock_calendar
+
+        mgr.create_task(
+            calendar_uid="cal-123",
+            summary="Anchored recurring task",
+            recurrence_rule="FREQ=WEEKLY;COUNT=10",
+        )
+
+        ical = self._captured_ical(mock_calendar)
+        assert any(line.startswith("DTSTART") for line in ical.splitlines())
+        assert any(line.startswith("RRULE") for line in ical.splitlines())
