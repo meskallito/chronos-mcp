@@ -1485,10 +1485,15 @@ class TestUpdateTaskDateOnlyAndRecurrence:
             "20260622T090000" in line for line in ical.splitlines() if line.startswith("DTSTART")
         )
 
-    def test_clearing_recurrence_removes_rrule_and_dtstart(
+    def test_clearing_recurrence_removes_rrule_keeps_dtstart(
         self, mock_calendar_manager, mock_calendar
     ):
-        """An empty-string rule ⇒ neither RRULE nor DTSTART remains."""
+        """An empty-string rule ⇒ RRULE removed; the existing DTSTART is PRESERVED.
+
+        Regression (codex MAJOR #2): clearing recurrence must leave a valid
+        non-recurring VTODO with its start date intact — it must remove ONLY the
+        RRULE, not the DTSTART. (Previously DTSTART was deleted unconditionally.)
+        """
         caldav_task = self._caldav_task(
             ["DUE:20260622T090000Z", "DTSTART:20260622T090000Z", "RRULE:FREQ=DAILY;COUNT=5"]
         )
@@ -1500,7 +1505,58 @@ class TestUpdateTaskDateOnlyAndRecurrence:
         )
         ical = self._saved_ical(caldav_task)
         assert not any(line.startswith("RRULE") for line in ical.splitlines())
-        assert not any(line.startswith("DTSTART") for line in ical.splitlines())
+        dtstart_value = next(
+            line.split(":", 1)[1] for line in ical.splitlines() if line.startswith("DTSTART")
+        )
+        assert dtstart_value == "20260622T090000Z"
+
+    def test_clearing_recurrence_on_foreign_task_preserves_dtstart_and_due(
+        self, mock_calendar_manager, mock_calendar
+    ):
+        """codex MAJOR #2 (foreign shape): a task created by another CalDAV client
+        with a DISTINCT DTSTART (start) + DUE (deadline) + RRULE, when cleared of
+        recurrence, must keep RRULE gone but PRESERVE both DTSTART and DUE."""
+        caldav_task = self._caldav_task(
+            ["DTSTART:20260601T090000Z", "DUE:20260622T170000Z", "RRULE:FREQ=DAILY;COUNT=5"]
+        )
+        self._run(
+            mock_calendar_manager,
+            mock_calendar,
+            caldav_task,
+            recurrence_rule="",
+        )
+        ical = self._saved_ical(caldav_task)
+        lines = ical.splitlines()
+        assert not any(line.startswith("RRULE") for line in lines)
+        dtstart_value = next(line.split(":", 1)[1] for line in lines if line.startswith("DTSTART"))
+        due_value = next(line.split(":", 1)[1] for line in lines if line.startswith("DUE"))
+        assert dtstart_value == "20260601T090000Z"
+        assert due_value == "20260622T170000Z"
+
+    def test_updating_due_on_foreign_recurring_task_preserves_dtstart(
+        self, mock_calendar_manager, mock_calendar
+    ):
+        """codex MAJOR #1 (foreign shape): a recurring task with a DISTINCT
+        DTSTART (start) + DUE (deadline). Updating "due" must update the DUE
+        property and PRESERVE the existing DTSTART — it must NOT move the anchor
+        to the new due or drop DUE (that would corrupt a foreign task)."""
+        caldav_task = self._caldav_task(
+            ["DTSTART:20260601T090000Z", "DUE:20260622T170000Z", "RRULE:FREQ=DAILY;COUNT=5"]
+        )
+        self._run(
+            mock_calendar_manager,
+            mock_calendar,
+            caldav_task,
+            due=datetime(2026, 6, 30, 17, 0, tzinfo=timezone.utc),
+        )
+        ical = self._saved_ical(caldav_task)
+        lines = ical.splitlines()
+        dtstart_value = next(line.split(":", 1)[1] for line in lines if line.startswith("DTSTART"))
+        due_value = next(line.split(":", 1)[1] for line in lines if line.startswith("DUE"))
+        # DTSTART (the real start) is preserved; only DUE moves to the new value.
+        assert dtstart_value == "20260601T090000Z"
+        assert due_value == "20260630T170000Z"
+        assert any(line.startswith("RRULE") for line in lines)
 
     def test_recurrence_untouched_when_not_provided(self, mock_calendar_manager, mock_calendar):
         """recurrence_rule=None leaves an existing RRULE/DTSTART intact."""

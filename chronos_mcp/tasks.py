@@ -491,6 +491,22 @@ class TaskManager:
                     request_id=request_id,
                 )
 
+            # Capture the ORIGINAL DTSTART/DUE shape BEFORE any mutation below
+            # (DUE is deleted further down). This lets the recurrence branches
+            # distinguish OUR anchor-only tasks (DTSTART absent, or DTSTART==DUE)
+            # from FOREIGN tasks that carry a real start (DTSTART) AND a separate
+            # later deadline (DUE) — so we never clobber a foreign task's anchor.
+            orig_dtstart_prop = existing_task.get("dtstart")
+            orig_dtstart_dt = orig_dtstart_prop.dt if orig_dtstart_prop is not None else None
+            orig_due_prop = existing_task.get("due")
+            orig_due_dt = orig_due_prop.dt if orig_due_prop is not None else None
+            # FOREIGN start+deadline shape: both present AND distinct.
+            has_distinct_start_and_due = (
+                orig_dtstart_dt is not None
+                and orig_due_dt is not None
+                and orig_dtstart_dt != orig_due_dt
+            )
+
             # Update only provided fields
             if summary is not None:
                 existing_task["SUMMARY"] = summary
@@ -566,11 +582,16 @@ class TaskManager:
                 existing_dtstart_dt = (
                     existing_dtstart_prop.dt if existing_dtstart_prop is not None else None
                 )
-                # Always remove any existing RRULE/DTSTART first so set and
-                # clear both start from a clean slate.
+                # Always remove the existing RRULE first so set and clear both
+                # start from a clean slate.
                 if "RRULE" in existing_task:
                     del existing_task["RRULE"]
-                if "DTSTART" in existing_task:
+                # DTSTART is only torn down when we are about to RE-anchor a new
+                # rule. When CLEARING recurrence (recurrence_rule == ""), the
+                # task must remain a valid non-recurring VTODO with its start
+                # date intact — deleting DTSTART here would erase a foreign
+                # task's real DTSTART (start date). So preserve it on clear.
+                if recurrence_rule and "DTSTART" in existing_task:
                     del existing_task["DTSTART"]
                 if recurrence_rule:
                     # Anchor precedence (preserve the original schedule across
@@ -600,12 +621,25 @@ class TaskManager:
                         del existing_task["DUE"]
                     existing_task.add("DTSTART", anchor)
                     existing_task.add("RRULE", recurrence_rule)
-            elif due_updated and due_value is not None and "RRULE" in existing_task:
-                # The user MOVED the due of an already-recurring task (and no new
-                # rule was supplied): for a recurring VTODO the anchor IS the
-                # effective due (RFC 5545 anchors the RRULE to DTSTART), so move
-                # the DTSTART anchor to the new due value. We dropped the equal
-                # DUE just above when DUE was deleted, so nothing re-adds it.
+            elif (
+                due_updated
+                and due_value is not None
+                and "RRULE" in existing_task
+                and not has_distinct_start_and_due
+            ):
+                # OUR anchor-only shape: the user MOVED the due of an already-
+                # recurring task (and no new rule was supplied). For OUR recurring
+                # VTODOs the anchor IS the effective due (RFC 5545 anchors the
+                # RRULE to DTSTART), so move the DTSTART anchor to the new due
+                # value. We dropped the equal DUE just above when DUE was deleted,
+                # so nothing re-adds it.
+                #
+                # FOREIGN start+deadline shape (has_distinct_start_and_due) is
+                # deliberately EXCLUDED above: such a task has a real DTSTART
+                # (start) distinct from its DUE (deadline). Updating "due" must
+                # update the DUE property (already re-added with ``due_value``)
+                # and PRESERVE the existing DTSTART — we must NOT move the anchor
+                # or drop DUE. Excluding this branch leaves DTSTART/DUE intact.
                 if "DTSTART" in existing_task:
                     del existing_task["DTSTART"]
                 new_anchor = due_value
