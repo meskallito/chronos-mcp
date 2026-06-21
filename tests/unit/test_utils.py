@@ -3,11 +3,52 @@ Unit tests for utility functions
 """
 
 from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
 
 import pytest
 import pytz
 
-from chronos_mcp.utils import create_ical_event, datetime_to_ical, ical_to_datetime, parse_datetime
+from chronos_mcp.utils import (
+    _default_tz,
+    _resolve_default_tz,
+    create_ical_event,
+    datetime_to_ical,
+    ical_to_datetime,
+    parse_datetime,
+)
+
+
+@pytest.fixture(autouse=True)
+def _clear_default_tz_cache():
+    """Reset the cached default-timezone resolver so env changes take effect."""
+    _resolve_default_tz.cache_clear()
+    yield
+    _resolve_default_tz.cache_clear()
+
+
+class TestDefaultTimezone:
+    """Test the CHRONOS_DEFAULT_TIMEZONE-driven default timezone source"""
+
+    def test_default_tz_unset_is_utc(self, monkeypatch):
+        """Unset env defaults to UTC (back-compat)"""
+        monkeypatch.delenv("CHRONOS_DEFAULT_TIMEZONE", raising=False)
+        assert _default_tz() == timezone.utc
+
+    def test_default_tz_named_zone(self, monkeypatch):
+        """A valid IANA name resolves to that zone"""
+        monkeypatch.setenv("CHRONOS_DEFAULT_TIMEZONE", "America/New_York")
+        assert _default_tz() == ZoneInfo("America/New_York")
+
+    def test_default_tz_invalid_falls_back_and_warns(self, monkeypatch, caplog):
+        """An invalid name falls back to UTC and logs a warning"""
+        monkeypatch.setenv("CHRONOS_DEFAULT_TIMEZONE", "Not/AZone")
+        with caplog.at_level("WARNING"):
+            result = _default_tz()
+        assert result == timezone.utc
+        assert any(
+            "CHRONOS_DEFAULT_TIMEZONE" in rec.message and "Not/AZone" in rec.message
+            for rec in caplog.records
+        )
 
 
 class TestParseDatetime:
@@ -53,6 +94,56 @@ class TestParseDatetime:
         """Test parsing invalid datetime format"""
         with pytest.raises(ValueError, match="Invalid datetime format"):
             parse_datetime("not a date")
+
+    def test_parse_naive_uses_default_zone(self, monkeypatch):
+        """Naive input is stamped with CHRONOS_DEFAULT_TIMEZONE, not UTC"""
+        monkeypatch.setenv("CHRONOS_DEFAULT_TIMEZONE", "America/New_York")
+        result = parse_datetime("2026-06-21 14:00:00")
+        assert result.tzinfo == ZoneInfo("America/New_York")
+        assert result.year == 2026
+        assert result.month == 6
+        assert result.day == 21
+        assert result.hour == 14
+
+    def test_parse_aware_input_preserved(self, monkeypatch):
+        """An aware input string keeps its own offset regardless of default zone"""
+        monkeypatch.setenv("CHRONOS_DEFAULT_TIMEZONE", "America/New_York")
+        result = parse_datetime("2026-06-21T14:00:00+00:00")
+        assert result == datetime(2026, 6, 21, 14, 0, tzinfo=timezone.utc)
+
+    def test_parse_naive_unset_env_is_utc(self, monkeypatch):
+        """Unset env keeps the historical UTC default (back-compat)"""
+        monkeypatch.delenv("CHRONOS_DEFAULT_TIMEZONE", raising=False)
+        result = parse_datetime("2026-06-21 14:00:00")
+        assert result.tzinfo == timezone.utc
+        assert result.hour == 14
+
+    def test_parse_naive_invalid_env_is_utc(self, monkeypatch):
+        """Invalid env name falls back to UTC for naive input"""
+        monkeypatch.setenv("CHRONOS_DEFAULT_TIMEZONE", "Bogus/Zone")
+        result = parse_datetime("2026-06-21 14:00:00")
+        assert result.tzinfo == timezone.utc
+        assert result.hour == 14
+
+    def test_naive_timed_string_serializes_to_correct_instant(self, monkeypatch):
+        """A naive Eastern timed string serializes to the right UTC instant (no day shift)"""
+        monkeypatch.setenv("CHRONOS_DEFAULT_TIMEZONE", "America/New_York")
+        # Midnight June 21 Eastern is the instant 04:00Z on June 21 (EDT, UTC-4) --
+        # the old UTC-stamping bug rendered this as 00:00Z June 21, which a
+        # New_York client shows as 20:00 June 20 (the wrong day).
+        dt = parse_datetime("2026-06-21T00:00:00")
+        # Assert on the represented instant, not the literal offset/Z spelling.
+        assert dt.astimezone(timezone.utc) == datetime(2026, 6, 21, 4, 0, tzinfo=timezone.utc)
+        # And the serialized iCal (UTC) reflects that same instant on the right day.
+        assert datetime_to_ical(dt) == "20260621T040000Z"
+
+    def test_dst_spring_forward_instant(self, monkeypatch):
+        """DST boundary: a naive timed string on spring-forward day resolves correctly"""
+        monkeypatch.setenv("CHRONOS_DEFAULT_TIMEZONE", "America/New_York")
+        # 2026-03-08 is spring-forward in the US; 10:00 local is after the
+        # 02:00->03:00 jump, so the zone is EDT (UTC-4) => 14:00Z.
+        dt = parse_datetime("2026-03-08T10:00:00")
+        assert dt.astimezone(timezone.utc) == datetime(2026, 3, 8, 14, 0, tzinfo=timezone.utc)
 
 
 class TestDatetimeToIcal:

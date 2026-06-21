@@ -2,8 +2,11 @@
 Utility functions for Chronos MCP
 """
 
-from datetime import datetime, timezone
+import os
+from datetime import datetime, timezone, tzinfo
+from functools import lru_cache
 from typing import Optional, Tuple, Union
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dateutil import parser  # type: ignore[import-untyped]
 from icalendar import Event as iEvent  # type: ignore[import-untyped]
@@ -11,6 +14,32 @@ from icalendar import Event as iEvent  # type: ignore[import-untyped]
 from .logging_config import setup_logging
 
 logger = setup_logging()
+
+
+@lru_cache(maxsize=None)
+def _resolve_default_tz(name: str) -> tzinfo:
+    """Resolve an IANA timezone name to a tzinfo, falling back to UTC.
+
+    Cached on the resolved name so the warning is logged only once per
+    invalid name. ``"UTC"`` returns ``timezone.utc`` (not ``ZoneInfo("UTC")``)
+    for back-compat with callers/tests comparing against ``timezone.utc``.
+    """
+    if name == "UTC":
+        return timezone.utc
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError, OSError):
+        logger.warning("Invalid CHRONOS_DEFAULT_TIMEZONE %r; falling back to UTC", name)
+        return timezone.utc
+
+
+def _default_tz() -> tzinfo:
+    """Return the configured default timezone for naive datetimes.
+
+    Reads ``CHRONOS_DEFAULT_TIMEZONE`` (IANA name, default ``"UTC"``). An
+    invalid/unresolvable name falls back to UTC and logs a warning once.
+    """
+    return _resolve_default_tz(os.getenv("CHRONOS_DEFAULT_TIMEZONE", "UTC"))
 
 
 def parse_datetime(dt_str: Union[str, datetime]) -> datetime:
@@ -21,9 +50,9 @@ def parse_datetime(dt_str: Union[str, datetime]) -> datetime:
     # Try parsing with dateutil
     try:
         dt = parser.parse(dt_str)
-        # Ensure timezone awareness
+        # Ensure timezone awareness using the configured default zone
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
+            dt = dt.replace(tzinfo=_default_tz())
         return dt
     except Exception as e:
         logger.error(f"Error parsing datetime '{dt_str}': {e}")
