@@ -1036,10 +1036,11 @@ class TestCreateTaskRecurrence:
         assert "BYDAY=MO,TU,WE,TH,FR" in rrule_line
         assert any(line.startswith("DTSTART") for line in ical.splitlines())
 
-    def test_recurring_task_dtstart_equals_due_no_duration(
+    def test_recurring_task_dtstart_anchor_no_equal_due_no_duration(
         self, mock_calendar_manager, mock_calendar
     ):
-        """RFC-validity: DTSTART == DUE (so DUE >= DTSTART) and no DURATION emitted."""
+        """RFC 5545 §3.8.2.3: DUE MUST be strictly later than DTSTART, so a
+        recurring task emits ONLY the DTSTART anchor (no equal DUE) and no DURATION."""
         mgr = TaskManager(mock_calendar_manager)
         mock_calendar_manager.get_calendar.return_value = mock_calendar
 
@@ -1051,13 +1052,13 @@ class TestCreateTaskRecurrence:
         )
 
         ical = self._captured_ical(mock_calendar)
-        due_value = next(
-            line.split(":", 1)[1] for line in ical.splitlines() if line.startswith("DUE")
-        )
         dtstart_value = next(
             line.split(":", 1)[1] for line in ical.splitlines() if line.startswith("DTSTART")
         )
-        assert dtstart_value == due_value
+        # The anchor is preserved as a UTC instant.
+        assert dtstart_value == "20260622T090000Z"
+        # No DUE equal to DTSTART (would violate the strict-later rule), no DURATION.
+        assert not any(line.startswith("DUE") for line in ical.splitlines())
         assert "DURATION" not in ical
 
     def test_recurring_task_invalid_rrule_raises_no_save(
@@ -1078,10 +1079,11 @@ class TestCreateTaskRecurrence:
         mock_calendar.save_todo.assert_not_called()
         mock_calendar.save_event.assert_not_called()
 
-    def test_recurring_date_only_keeps_value_date_on_both(
+    def test_recurring_date_only_keeps_value_date_on_dtstart(
         self, mock_calendar_manager, mock_calendar
     ):
-        """A date-only recurring task keeps VALUE=DATE on BOTH DTSTART and DUE."""
+        """A date-only recurring task emits a VALUE=DATE DTSTART anchor (and per
+        RFC 5545 §3.8.2.3 drops the equal DUE)."""
         mgr = TaskManager(mock_calendar_manager)
         mock_calendar_manager.get_calendar.return_value = mock_calendar
 
@@ -1094,12 +1096,11 @@ class TestCreateTaskRecurrence:
         )
 
         ical = self._captured_ical(mock_calendar)
-        due_line = next(line for line in ical.splitlines() if line.startswith("DUE"))
         dtstart_line = next(line for line in ical.splitlines() if line.startswith("DTSTART"))
-        assert "VALUE=DATE:20260621" in due_line
         assert "VALUE=DATE:20260621" in dtstart_line
-        assert "T" not in due_line.split(":", 1)[1]
         assert "T" not in dtstart_line.split(":", 1)[1]
+        # Equal DUE is dropped (would violate DUE-strictly-later-than-DTSTART).
+        assert not any(line.startswith("DUE") for line in ical.splitlines())
 
     def test_recurring_task_no_due_anchors_to_today(self, mock_calendar_manager, mock_calendar):
         """No due provided ⇒ DTSTART anchors to today-in-default-tz; RRULE present."""
@@ -1333,7 +1334,8 @@ class TestUpdateTaskDateOnlyAndRecurrence:
     # ---- (4b) RRULE set / clear + DTSTART anchor --------------------------
 
     def test_adding_recurrence_sets_rrule_and_dtstart(self, mock_calendar_manager, mock_calendar):
-        """Adding a rule ⇒ RRULE + DTSTART (anchored to the updated DUE)."""
+        """Adding a rule ⇒ RRULE + DTSTART anchored to the updated DUE; the equal
+        DUE is dropped per RFC 5545 §3.8.2.3 (DUE strictly later than DTSTART)."""
         caldav_task = self._caldav_task(["DUE:20260622T090000Z"])
         self._run(
             mock_calendar_manager,
@@ -1344,13 +1346,12 @@ class TestUpdateTaskDateOnlyAndRecurrence:
         )
         ical = self._saved_ical(caldav_task)
         assert any(line.startswith("RRULE") for line in ical.splitlines())
-        due_value = next(
-            line.split(":", 1)[1] for line in ical.splitlines() if line.startswith("DUE")
-        )
         dtstart_value = next(
             line.split(":", 1)[1] for line in ical.splitlines() if line.startswith("DTSTART")
         )
-        assert dtstart_value == due_value
+        assert dtstart_value == "20260622T090000Z"
+        # Equal DUE dropped (strict-later rule); no DURATION.
+        assert not any(line.startswith("DUE") for line in ical.splitlines())
         assert "DURATION" not in ical
 
     def test_adding_recurrence_anchors_to_existing_due(self, mock_calendar_manager, mock_calendar):
@@ -1413,7 +1414,8 @@ class TestUpdateTaskDateOnlyAndRecurrence:
         caldav_task.save.assert_not_called()
 
     def test_updating_due_resyncs_existing_dtstart(self, mock_calendar_manager, mock_calendar):
-        """Changing DUE on a recurring task (no new rule) re-anchors DTSTART to the new DUE."""
+        """Changing DUE on a recurring task (no new rule) re-anchors DTSTART to the
+        new DUE; the equal DUE is dropped per RFC 5545 §3.8.2.3."""
         caldav_task = self._caldav_task(
             ["DUE:20260622T090000Z", "DTSTART:20260622T090000Z", "RRULE:FREQ=DAILY;COUNT=5"]
         )
@@ -1424,14 +1426,12 @@ class TestUpdateTaskDateOnlyAndRecurrence:
             due=datetime(2026, 6, 25, 9, 0, tzinfo=timezone.utc),
         )
         ical = self._saved_ical(caldav_task)
-        due_value = next(
-            line.split(":", 1)[1] for line in ical.splitlines() if line.startswith("DUE")
-        )
         dtstart_value = next(
             line.split(":", 1)[1] for line in ical.splitlines() if line.startswith("DTSTART")
         )
-        assert "20260625T090000" in due_value
-        assert dtstart_value == due_value
+        assert dtstart_value == "20260625T090000Z"
+        # DTSTART moved to the new DUE moment; equal DUE dropped.
+        assert not any(line.startswith("DUE") for line in ical.splitlines())
         assert any(line.startswith("RRULE") for line in ical.splitlines())
 
     def test_clearing_due_on_recurring_task_keeps_dtstart_anchor(
@@ -1529,6 +1529,53 @@ class TestUpdateTaskDateOnlyAndRecurrence:
                 mock_calendar,
                 caldav_task,
                 recurrence_rule="FREQ=DAILY;UNTIL=20261231T000000Z",
+            )
+        caldav_task.save.assert_not_called()
+
+    def test_switching_recurring_anchor_to_date_revalidates_until(
+        self, mock_calendar_manager, mock_calendar
+    ):
+        """Flipping a timed recurring task to all-day (date anchor) WITHOUT
+        replacing the rule must re-validate the EXISTING rule's UNTIL: a
+        DATE-TIME UNTIL against the new DATE anchor is rejected (RFC 5545
+        §3.3.10). Regression for codex MAJOR #1."""
+        caldav_task = self._caldav_task(
+            [
+                "DUE:20260622T090000Z",
+                "DTSTART:20260622T090000Z",
+                "RRULE:FREQ=DAILY;UNTIL=20261231T000000Z",
+            ]
+        )
+        with pytest.raises(EventCreationError):
+            self._run(
+                mock_calendar_manager,
+                mock_calendar,
+                caldav_task,
+                due=datetime(2026, 6, 25, 0, 0, tzinfo=timezone.utc),
+                all_day=True,  # timed -> date-only flips the anchor value-type
+            )
+        caldav_task.save.assert_not_called()
+
+    def test_switching_recurring_anchor_to_datetime_revalidates_until(
+        self, mock_calendar_manager, mock_calendar
+    ):
+        """Flipping a date-only recurring task to timed (date-time anchor)
+        WITHOUT replacing the rule must re-validate the EXISTING rule's UNTIL:
+        a DATE UNTIL against the new DATE-TIME anchor is rejected."""
+        caldav_task = self._caldav_task(
+            [
+                "DUE;VALUE=DATE:20260621",
+                "DTSTART;VALUE=DATE:20260621",
+                "RRULE:FREQ=DAILY;UNTIL=20261231",
+            ]
+        )
+        with pytest.raises(EventCreationError):
+            self._run(
+                mock_calendar_manager,
+                mock_calendar,
+                caldav_task,
+                due=datetime(2026, 6, 25, 9, 0, tzinfo=timezone.utc),
+                all_day=False,  # date-only -> timed flips the anchor value-type
             )
         caldav_task.save.assert_not_called()
 

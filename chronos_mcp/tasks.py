@@ -40,6 +40,30 @@ def _is_date_value(value: object) -> bool:
     return isinstance(dt, date) and not isinstance(dt, datetime)
 
 
+def _to_utc(value: Union[date, datetime]) -> Union[date, datetime]:
+    """Normalize a TIMED ``datetime`` to UTC (mirrors events.py).
+
+    An aware, non-UTC ``datetime`` is converted to UTC so it serializes as
+    ``...Z`` with no ``TZID`` parameter — avoiding the RFC 5545 §3.2.19
+    requirement to embed a matching VTIMEZONE for each referenced TZID.
+    Naive datetimes and bare ``date`` (VALUE=DATE) values are returned
+    unchanged (the write path defaults naive input's zone upstream).
+    """
+    if isinstance(value, datetime) and value.tzinfo is not None and value.tzinfo != timezone.utc:
+        return value.astimezone(timezone.utc)
+    return value
+
+
+def _due_equals_anchor(due_prop: object, anchor: Union[date, datetime]) -> bool:
+    """Return True when an emitted DUE represents the same instant/day as the anchor.
+
+    Used to drop a recurring task's DUE when it would equal DTSTART, since
+    RFC 5545 §3.8.2.3 requires DUE to be strictly later than DTSTART.
+    """
+    due_dt = getattr(due_prop, "dt", due_prop)
+    return due_dt == anchor
+
+
 def _rrule_until_is_datetime(recurrence_rule: str) -> Optional[bool]:
     """Inspect an RRULE string's ``UNTIL`` token and report its value-type.
 
@@ -166,25 +190,34 @@ class TaskManager:
                 task.add("description", description)
             # Compute the DUE value (a date for all-day, else the datetime) so it
             # can also be reused as the RRULE DTSTART anchor with a matching value-type.
-            # NOTE: unlike events.py, timed task DUE/DTSTART are emitted in their
-            # supplied (default-zone) datetime rather than normalized to UTC. This
-            # is deliberate — the date-grounding fix relies on preserving the zone.
+            # NOTE: mirror events.py — TIMED (non-all-day) DUE/DTSTART are
+            # normalized to UTC (``...Z``) before emission. This avoids emitting a
+            # ``TZID=`` parameter without a matching VTIMEZONE component, which
+            # RFC 5545 §3.2.19 requires for each referenced TZID. Normalizing to
+            # UTC preserves the instant, so it does NOT reintroduce the day-shift
+            # bug (that was about stamping a wrong zone on NAIVE input, fixed by
+            # defaulting naive input to the configured zone upstream). DATE-only
+            # (all-day) values stay bare ``date`` → VALUE=DATE.
             due_value = None
             if due:
                 if all_day:
                     # Emit DUE;VALUE=DATE:YYYYMMDD (no time, no UTC day-shift)
                     due_value = due.date() if isinstance(due, datetime) else due
                 else:
-                    due_value = due
+                    due_value = _to_utc(due)
                 task.add("due", due_value)
             if recurrence_rule:
                 # RFC 5545: a VTODO RRULE anchors to DTSTART. Anchor to the DUE
-                # value (same value-type as DUE so DTSTART == DUE), or to
-                # today-in-default-tz when no due is provided. Never emit a
-                # DURATION (a VTODO must not carry both DUE and DURATION).
+                # value (same value-type as DUE). Per RFC 5545 §3.8.2.3, a DUE
+                # specified alongside DTSTART MUST be strictly LATER than DTSTART,
+                # so for a recurring task we emit only the DTSTART anchor and do
+                # NOT also emit an equal DUE. Never emit a DURATION (a VTODO must
+                # not carry both DUE and DURATION).
                 anchor = _anchor_for(due_value, None, all_day)
                 # RFC 5545 §3.3.10: UNTIL value-type must match the anchor.
                 _validate_until_value_type(recurrence_rule, anchor, summary, request_id)
+                if "DUE" in task and _due_equals_anchor(task.get("due"), anchor):
+                    del task["DUE"]
                 task.add("dtstart", anchor)
                 task.add("rrule", recurrence_rule)
             if priority is not None and 1 <= priority <= 9:
@@ -473,7 +506,9 @@ class TaskManager:
                     if effective_all_day:
                         due_value = due.date() if isinstance(due, datetime) else due
                     else:
-                        due_value = due
+                        # Normalize timed DUE to UTC (mirrors events.py) so it
+                        # serializes as ``...Z`` with no TZID/VTIMEZONE requirement.
+                        due_value = _to_utc(due)
                     existing_task.add("DUE", due_value)
 
             if priority is not None:
@@ -537,6 +572,13 @@ class TaskManager:
                     _validate_until_value_type(
                         recurrence_rule, anchor, f"Task {task_uid}", request_id
                     )
+                    # RFC 5545 §3.8.2.3: a DUE specified alongside DTSTART MUST be
+                    # strictly later than DTSTART. When the anchor equals DUE, drop
+                    # DUE and keep only the DTSTART recurrence anchor.
+                    if "DUE" in existing_task and _due_equals_anchor(
+                        existing_task.get("due"), anchor
+                    ):
+                        del existing_task["DUE"]
                     existing_task.add("DTSTART", anchor)
                     existing_task.add("RRULE", recurrence_rule)
             elif due_updated and "RRULE" in existing_task:
@@ -556,7 +598,25 @@ class TaskManager:
                 # we re-anchor to today, matching the prior DTSTART's
                 # date-vs-datetime value-type so an all-day recurrence stays
                 # all-day. (A recurring VTODO MUST keep a DTSTART anchor.)
-                existing_task.add("DTSTART", _anchor_for(due_value, None, existing_anchor_is_date))
+                new_anchor = _anchor_for(due_value, None, existing_anchor_is_date)
+                # RFC 5545 §3.3.10: the DUE/all_day change may have flipped the
+                # anchor value-type (timed↔date-only). Re-validate the EXISTING
+                # rule's UNTIL against the NEW anchor so we never leave a DATE
+                # anchor with a DATE-TIME UNTIL (or vice versa).
+                existing_rrule_prop = existing_task.get("rrule")
+                if existing_rrule_prop is not None:
+                    _validate_until_value_type(
+                        existing_rrule_prop.to_ical().decode(),
+                        new_anchor,
+                        f"Task {task_uid}",
+                        request_id,
+                    )
+                # RFC 5545 §3.8.2.3: drop a DUE that would equal the DTSTART anchor.
+                if "DUE" in existing_task and _due_equals_anchor(
+                    existing_task.get("due"), new_anchor
+                ):
+                    del existing_task["DUE"]
+                existing_task.add("DTSTART", new_anchor)
 
             # Update last-modified timestamp
             if "LAST-MODIFIED" in existing_task:
