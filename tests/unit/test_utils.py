@@ -11,20 +11,15 @@ import pytz
 from chronos_mcp.utils import (
     _default_tz,
     _is_date_only,
-    _resolve_default_tz,
     create_ical_event,
     datetime_to_ical,
     ical_to_datetime,
     parse_datetime,
 )
 
-
-@pytest.fixture(autouse=True)
-def _clear_default_tz_cache():
-    """Reset the cached default-timezone resolver so env changes take effect."""
-    _resolve_default_tz.cache_clear()
-    yield
-    _resolve_default_tz.cache_clear()
+# NOTE: the autouse ``_reset_default_tz`` fixture in tests/conftest.py already
+# clears the ``_resolve_default_tz`` lru_cache and drops CHRONOS_DEFAULT_TIMEZONE
+# before/after every test, so no local cache-reset fixture is needed here.
 
 
 class TestDefaultTimezone:

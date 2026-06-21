@@ -1202,32 +1202,24 @@ class TestUpdateTaskDateOnlyAndRecurrence:
         assert "VALUE=DATE" not in due_line
         assert "20260621T093000" in due_line
 
-    def test_naive_updated_due_gets_default_tz(self, mock_calendar_manager, mock_calendar):
+    def test_naive_updated_due_gets_default_tz(
+        self, mock_calendar_manager, mock_calendar, monkeypatch
+    ):
         """A naive updated due is stamped with the default zone (NY → instant shifts to UTC)."""
-        import os
-        from chronos_mcp.utils import _resolve_default_tz
+        from chronos_mcp.utils import parse_datetime
+
+        # The autouse ``_reset_default_tz`` conftest fixture clears the cache.
+        monkeypatch.setenv("CHRONOS_DEFAULT_TIMEZONE", "America/New_York")
 
         caldav_task = self._caldav_task(["DUE:20260101T000000Z"])
-        _resolve_default_tz.cache_clear()
-        old = os.environ.get("CHRONOS_DEFAULT_TIMEZONE")
-        os.environ["CHRONOS_DEFAULT_TIMEZONE"] = "America/New_York"
-        try:
-            from chronos_mcp.utils import parse_datetime
-
-            due_dt = parse_datetime("2026-06-21T09:30:00")  # naive ⇒ stamped NY
-            self._run(
-                mock_calendar_manager,
-                mock_calendar,
-                caldav_task,
-                due=due_dt,
-                all_day=False,
-            )
-        finally:
-            if old is None:
-                os.environ.pop("CHRONOS_DEFAULT_TIMEZONE", None)
-            else:
-                os.environ["CHRONOS_DEFAULT_TIMEZONE"] = old
-            _resolve_default_tz.cache_clear()
+        due_dt = parse_datetime("2026-06-21T09:30:00")  # naive ⇒ stamped NY
+        self._run(
+            mock_calendar_manager,
+            mock_calendar,
+            caldav_task,
+            due=due_dt,
+            all_day=False,
+        )
 
         # Assert on the represented instant (not the literal Z/offset spelling):
         # re-parse the saved VTODO and compare the DUE moment in UTC.

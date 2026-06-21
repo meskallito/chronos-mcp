@@ -3,8 +3,8 @@ Task operations for Chronos MCP
 """
 
 import uuid
-from datetime import datetime, time, timezone
-from typing import List, Optional
+from datetime import date, datetime, time, timezone
+from typing import List, Optional, Union
 
 import caldav  # type: ignore[import-untyped,import-not-found]
 from caldav import Event as CalDAVEvent
@@ -25,6 +25,40 @@ from .models import Task, TaskStatus
 from .utils import _default_tz, ical_to_datetime, validate_rrule
 
 logger = setup_logging()
+
+
+def _is_date_value(value: object) -> bool:
+    """Return True when ``value`` represents a date-only (VALUE=DATE) value.
+
+    Accepts either an icalendar property (with a ``.dt`` attribute) or a raw
+    ``date``/``datetime``. A date-only value has no time component, i.e. its
+    underlying object is a ``date`` that is not a ``datetime`` (equivalently,
+    it has no ``hour`` attribute). Used by both the write and read paths to
+    derive the DATE-vs-DATE-TIME value-type.
+    """
+    dt = getattr(value, "dt", value)
+    return isinstance(dt, date) and not isinstance(dt, datetime)
+
+
+def _anchor_for(
+    due_value: Union[date, datetime, None],
+    existing_due: Union[date, datetime, None],
+    all_day: bool,
+) -> Union[date, datetime]:
+    """Select the DTSTART anchor for a recurring VTODO (RFC 5545).
+
+    The RRULE of a VTODO anchors to DTSTART, which we keep at the same
+    value-type as DUE. Preference ladder: the freshly-supplied ``due_value``,
+    else the task's ``existing_due``, else today in the default zone (a bare
+    ``date`` when ``all_day`` is truthy, otherwise a zoned ``datetime``).
+    """
+    if due_value is not None:
+        return due_value
+    if existing_due is not None:
+        return existing_due
+    if all_day:
+        return datetime.now(_default_tz()).date()
+    return datetime.now(_default_tz())
 
 
 class TaskManager:
@@ -83,6 +117,9 @@ class TaskManager:
                 task.add("description", description)
             # Compute the DUE value (a date for all-day, else the datetime) so it
             # can also be reused as the RRULE DTSTART anchor with a matching value-type.
+            # NOTE: unlike events.py, timed task DUE/DTSTART are emitted in their
+            # supplied (default-zone) datetime rather than normalized to UTC. This
+            # is deliberate — the date-grounding fix relies on preserving the zone.
             due_value = None
             if due:
                 if all_day:
@@ -96,13 +133,7 @@ class TaskManager:
                 # value (same value-type as DUE so DTSTART == DUE), or to
                 # today-in-default-tz when no due is provided. Never emit a
                 # DURATION (a VTODO must not carry both DUE and DURATION).
-                if due_value is not None:
-                    anchor = due_value
-                elif all_day:
-                    anchor = datetime.now(_default_tz()).date()
-                else:
-                    anchor = datetime.now(_default_tz())
-                task.add("dtstart", anchor)
+                task.add("dtstart", _anchor_for(due_value, None, all_day))
                 task.add("rrule", recurrence_rule)
             if priority is not None and 1 <= priority <= 9:
                 task.add("priority", priority)
@@ -372,8 +403,9 @@ class TaskManager:
                 due_updated = True
                 # Detect the existing DUE's value-type BEFORE deleting it so a
                 # tri-state ``all_day=None`` can preserve date-only-ness.
-                existing_due_is_date = existing_task.get("due") is not None and not hasattr(
-                    existing_task.get("due").dt, "hour"
+                existing_due_prop = existing_task.get("due")
+                existing_due_is_date = existing_due_prop is not None and _is_date_value(
+                    existing_due_prop
                 )
                 if "DUE" in existing_task:
                     del existing_task["DUE"]
@@ -428,15 +460,13 @@ class TaskManager:
                     # Anchor DTSTART to the DUE value: the freshly-updated due
                     # if provided, else the task's current DUE, else
                     # today-in-default-tz (matching its all_day-ness).
-                    if due_value is not None:
-                        anchor = due_value
-                    elif existing_task.get("due") is not None:
-                        anchor = existing_task.get("due").dt
-                    elif all_day:
-                        anchor = datetime.now(_default_tz()).date()
-                    else:
-                        anchor = datetime.now(_default_tz())
-                    existing_task.add("DTSTART", anchor)
+                    existing_due_prop = existing_task.get("due")
+                    existing_due_dt = (
+                        existing_due_prop.dt if existing_due_prop is not None else None
+                    )
+                    existing_task.add(
+                        "DTSTART", _anchor_for(due_value, existing_due_dt, bool(all_day))
+                    )
                     existing_task.add("RRULE", recurrence_rule)
             elif due_updated and "RRULE" in existing_task:
                 # DUE changed on an already-recurring task and no new rule was
@@ -445,21 +475,17 @@ class TaskManager:
                 # never strip it to nothing — if the DUE was *cleared*
                 # (due_value is None), re-anchor to today-in-default-tz instead
                 # of leaving a dangling RRULE.
-                existing_anchor_is_date = existing_task.get("dtstart") is not None and not hasattr(
-                    existing_task.get("dtstart").dt, "hour"
+                existing_dtstart_prop = existing_task.get("dtstart")
+                existing_anchor_is_date = existing_dtstart_prop is not None and _is_date_value(
+                    existing_dtstart_prop
                 )
                 if "DTSTART" in existing_task:
                     del existing_task["DTSTART"]
-                if due_value is not None:
-                    existing_task.add("DTSTART", due_value)
-                else:
-                    # DUE cleared: re-anchor, matching the prior DTSTART's
-                    # date-vs-datetime value-type so an all-day recurrence stays
-                    # all-day.
-                    if existing_anchor_is_date:
-                        existing_task.add("DTSTART", datetime.now(_default_tz()).date())
-                    else:
-                        existing_task.add("DTSTART", datetime.now(_default_tz()))
+                # ``due_value`` (the freshly-set DUE) wins; when DUE was cleared
+                # we re-anchor to today, matching the prior DTSTART's
+                # date-vs-datetime value-type so an all-day recurrence stays
+                # all-day. (A recurring VTODO MUST keep a DTSTART anchor.)
+                existing_task.add("DTSTART", _anchor_for(due_value, None, existing_anchor_is_date))
 
             # Update last-modified timestamp
             if "LAST-MODIFIED" in existing_task:
@@ -549,8 +575,8 @@ class TaskManager:
                     # original day-shift bug.
                     due_prop = component.get("due")
                     if due_prop is not None:
-                        # VALUE=DATE → ``.dt`` is a ``date`` with no ``hour``.
-                        is_date = hasattr(due_prop, "dt") and not hasattr(due_prop.dt, "hour")
+                        # VALUE=DATE → ``.dt`` is a ``date`` that is not a ``datetime``.
+                        is_date = hasattr(due_prop, "dt") and _is_date_value(due_prop)
                         if is_date:
                             all_day = True
                             # Midnight in the default zone, NOT UTC, so callers
