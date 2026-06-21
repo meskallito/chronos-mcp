@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Date-only tasks**: `create_task`/`update_task` accept `all_day` (and auto-detect a bare
+  `YYYY-MM-DD` due) to emit `DUE;VALUE=DATE:20260621` instead of a spurious midnight `DATE-TIME`.
+- **Recurring tasks**: `create_task`/`update_task` accept `recurrence_rule`, validated via
+  `validate_rrule`, emitting `RRULE` plus a `DTSTART` anchor (RFC 5545 requires the RRULE to be
+  anchored to `DTSTART` on a VTODO). An RRULE must include a terminator (`COUNT` or `UNTIL`).
+- **`CHRONOS_DEFAULT_TIMEZONE`** env var (IANA name, default `UTC`) selecting the zone used to
+  interpret naive datetimes.
+
+### Fixed
+- **Timezone correctness for tasks**: naive datetimes are now interpreted in
+  `CHRONOS_DEFAULT_TIMEZONE` instead of being force-stamped UTC, so a date no longer shifts a day
+  for non-UTC clients. The read path detects `VALUE=DATE` dues (round-tripping `all_day` and the
+  calendar day) and surfaces `RRULE`.
+
 ## [2.1.0] - 2026-05-19
 
 ### Fixed

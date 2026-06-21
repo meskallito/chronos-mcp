@@ -43,6 +43,12 @@ A comprehensive Model Context Protocol (MCP) server for CalDAV calendar manageme
 Chronos MCP provides comprehensive support for CalDAV tasks:
 
 - **Create tasks** with due dates, priorities, and descriptions
+- **Date-only tasks**: pass `all_day: true` (or a bare `YYYY-MM-DD` due) to store
+  `DUE;VALUE=DATE` with no time and no day-shift
+- **Recurring tasks**: pass a `recurrence_rule` (must include `COUNT` or `UNTIL`) to store an
+  `RRULE` anchored to `DTSTART`
+- **Timezone-aware**: naive datetimes are interpreted in `CHRONOS_DEFAULT_TIMEZONE` (see
+  Configuration), not forced to UTC
 - **Track progress** with percentage completion (0-100%)
 - **Manage status**: NEEDS-ACTION, IN-PROCESS, COMPLETED, CANCELLED
 - **Create subtasks** using related_to relationships
@@ -162,6 +168,14 @@ pip install keyring>=24.0.0
 CALDAV_BASE_URL=http://<YOUR_CALDAV_SERVER>:5232
 CALDAV_USERNAME=<YOUR_USERNAME>
 CALDAV_PASSWORD=<YOUR_PASSWORD>
+```
+
+### Default Timezone
+
+```bash
+# IANA zone used to interpret naive datetimes (default: UTC).
+# e.g. so a task due "2026-06-21T09:00:00" lands at 9am Eastern, not UTC.
+CHRONOS_DEFAULT_TIMEZONE=America/New_York
 ```
 
 ### Multi-Account Configuration
