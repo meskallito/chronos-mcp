@@ -209,6 +209,11 @@ class TaskManager:
                 else:
                     due_value = _to_utc(due)
                 task.add("due", due_value)
+            # The returned Task must agree with what get/list read back. For a
+            # due-less RECURRING task we write a DTSTART anchor and expose it as
+            # ``due`` on the read path, so mirror that here (set below).
+            result_due = due
+            result_all_day = all_day
             if recurrence_rule:
                 # RFC 5545: a VTODO RRULE anchors to DTSTART. Anchor to the DUE
                 # value (same value-type as DUE). Per RFC 5545 §3.8.2.3, a DUE
@@ -223,6 +228,17 @@ class TaskManager:
                     del task["DUE"]
                 task.add("dtstart", anchor)
                 task.add("rrule", recurrence_rule)
+                # Parity with the read path: when no DUE was provided, the
+                # DTSTART anchor IS the effective due. Surface it on the returned
+                # model (mirroring ``_parse_caldav_task``'s DATE→default-tz
+                # midnight handling) so the create response matches a read-back.
+                if due is None:
+                    if _is_date_value(task.get("dtstart")):
+                        result_all_day = True
+                        result_due = datetime.combine(anchor, time.min, tzinfo=_default_tz())
+                    else:
+                        result_all_day = False
+                        result_due = anchor
             if priority is not None and 1 <= priority <= 9:
                 task.add("priority", priority)
             task.add("status", status.value)
@@ -261,8 +277,8 @@ class TaskManager:
                 uid=task_uid,
                 summary=summary,
                 description=description,
-                due=due,
-                all_day=all_day,
+                due=result_due,
+                all_day=result_all_day,
                 completed=None,
                 priority=priority,
                 status=status,
@@ -584,24 +600,15 @@ class TaskManager:
                         del existing_task["DUE"]
                     existing_task.add("DTSTART", anchor)
                     existing_task.add("RRULE", recurrence_rule)
-            elif due_updated and "RRULE" in existing_task:
-                # DUE changed on an already-recurring task and no new rule was
-                # supplied: keep the DTSTART anchor in sync with the new DUE.
-                # A recurring VTODO MUST retain a DTSTART anchor (RFC 5545), so
-                # never strip it to nothing — if the DUE was *cleared*
-                # (due_value is None), re-anchor to today-in-default-tz instead
-                # of leaving a dangling RRULE.
-                existing_dtstart_prop = existing_task.get("dtstart")
-                existing_anchor_is_date = existing_dtstart_prop is not None and _is_date_value(
-                    existing_dtstart_prop
-                )
+            elif due_updated and due_value is not None and "RRULE" in existing_task:
+                # The user MOVED the due of an already-recurring task (and no new
+                # rule was supplied): for a recurring VTODO the anchor IS the
+                # effective due (RFC 5545 anchors the RRULE to DTSTART), so move
+                # the DTSTART anchor to the new due value. We dropped the equal
+                # DUE just above when DUE was deleted, so nothing re-adds it.
                 if "DTSTART" in existing_task:
                     del existing_task["DTSTART"]
-                # ``due_value`` (the freshly-set DUE) wins; when DUE was cleared
-                # we re-anchor to today, matching the prior DTSTART's
-                # date-vs-datetime value-type so an all-day recurrence stays
-                # all-day. (A recurring VTODO MUST keep a DTSTART anchor.)
-                new_anchor = _anchor_for(due_value, None, existing_anchor_is_date)
+                new_anchor = due_value
                 # RFC 5545 §3.3.10: the DUE/all_day change may have flipped the
                 # anchor value-type (timed↔date-only). Re-validate the EXISTING
                 # rule's UNTIL against the NEW anchor so we never leave a DATE
@@ -620,6 +627,11 @@ class TaskManager:
                 ):
                     del existing_task["DUE"]
                 existing_task.add("DTSTART", new_anchor)
+            # NOTE: when the due was CLEARED on a recurring task (due_updated and
+            # due_value is None) we deliberately do NOTHING to DTSTART: a
+            # recurring VTODO still needs its anchor, so we PRESERVE the existing
+            # valid DTSTART rather than resetting it to today. Likewise, when the
+            # due is NOT touched at all, the existing DTSTART is left intact.
 
             # Update last-modified timestamp
             if "LAST-MODIFIED" in existing_task:
@@ -708,13 +720,22 @@ class TaskManager:
                     # flattens a date to midnight-UTC — the read-side of the
                     # original day-shift bug.
                     due_prop = component.get("due")
-                    # A recurring VTODO emits its anchor as DTSTART and (per RFC
+                    # A RECURRING VTODO emits its anchor as DTSTART and (per RFC
                     # 5545 §3.8.2.3) DROPS a DUE that would equal it, so a no-DUE
-                    # recurring task carries only DTSTART. When DUE is absent, fall
-                    # back to DTSTART as the source for ``due``/``all_day`` so such
-                    # tasks round-trip with their anchor date instead of None.
-                    # DUE takes precedence when present.
-                    date_prop = due_prop if due_prop is not None else component.get("dtstart")
+                    # recurring task carries only DTSTART — that anchor IS the
+                    # effective due, so fall back to it when DUE is absent.
+                    # For a NON-recurring task, DTSTART is a START, NOT a due:
+                    # a start-only VTODO (DTSTART, no DUE, no RRULE) has no due,
+                    # so we must NOT read DTSTART as ``due`` there. Hence the
+                    # fallback is gated on the presence of an RRULE.
+                    # DUE always takes precedence when present.
+                    is_recurring = component.get("rrule") is not None
+                    if due_prop is not None:
+                        date_prop = due_prop
+                    elif is_recurring:
+                        date_prop = component.get("dtstart")
+                    else:
+                        date_prop = None
                     if date_prop is not None:
                         # VALUE=DATE → ``.dt`` is a ``date`` that is not a ``datetime``.
                         is_date = hasattr(date_prop, "dt") and _is_date_value(date_prop)

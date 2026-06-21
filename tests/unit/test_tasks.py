@@ -1204,6 +1204,71 @@ class TestCreateTaskRecurrence:
         assert result is not None
         assert result.recurrence_rule == "FREQ=WEEKLY;COUNT=10"
 
+    def test_dueless_recurring_create_returns_anchor_as_due(
+        self, mock_calendar_manager, mock_calendar
+    ):
+        """create_task for a DUE-less recurring task must return a Task whose
+        ``due`` equals the DTSTART anchor it wrote, so the create response agrees
+        with what get/list read back (which surface the anchor as ``due``).
+        Regression for codex MINOR #3."""
+        mgr = TaskManager(mock_calendar_manager)
+        mock_calendar_manager.get_calendar.return_value = mock_calendar
+
+        result = mgr.create_task(
+            calendar_uid="cal-123",
+            summary="Due-less recurring task",
+            recurrence_rule="FREQ=WEEKLY;COUNT=10",
+        )
+
+        # The create response now exposes a non-None due (the anchor), matching
+        # the read-back behavior.
+        assert result is not None
+        assert result.due is not None
+        # And it MUST equal the DTSTART anchor actually written to the VTODO.
+        ical = self._captured_ical(mock_calendar)
+        parsed = Mock()
+        parsed.data = ical
+        read_back = mgr._parse_caldav_task(
+            parsed, calendar_uid="cal-123", account_alias="test_account"
+        )
+        assert read_back is not None
+        assert read_back.due is not None
+        # Same instant and same all-day-ness as the create response. (iCal has
+        # second resolution, so compare at second precision — the create
+        # response carries the un-truncated ``now()`` anchor.)
+        assert result.all_day == read_back.all_day
+        assert result.due.astimezone(timezone.utc).replace(
+            microsecond=0
+        ) == read_back.due.astimezone(timezone.utc).replace(microsecond=0)
+
+    def test_dueless_recurring_date_only_create_returns_anchor_date(
+        self, mock_calendar_manager, mock_calendar
+    ):
+        """A DUE-less all-day recurring task returns all_day=True and a ``due``
+        on the anchor's date, matching the read-back. Regression for MINOR #3."""
+        mgr = TaskManager(mock_calendar_manager)
+        mock_calendar_manager.get_calendar.return_value = mock_calendar
+
+        result = mgr.create_task(
+            calendar_uid="cal-123",
+            summary="Due-less all-day recurring task",
+            all_day=True,
+            recurrence_rule="FREQ=DAILY;COUNT=30",
+        )
+
+        assert result is not None
+        assert result.all_day is True
+        assert result.due is not None
+        ical = self._captured_ical(mock_calendar)
+        parsed = Mock()
+        parsed.data = ical
+        read_back = mgr._parse_caldav_task(
+            parsed, calendar_uid="cal-123", account_alias="test_account"
+        )
+        assert read_back is not None
+        assert read_back.all_day is True
+        assert result.due.date() == read_back.due.date()
+
     # ---- RFC 5545 §3.3.10 UNTIL/anchor value-type consistency -------------
 
     def test_all_day_with_datetime_until_raises(self, mock_calendar_manager, mock_calendar):
@@ -1488,12 +1553,14 @@ class TestUpdateTaskDateOnlyAndRecurrence:
     def test_clearing_due_on_recurring_task_keeps_dtstart_anchor(
         self, mock_calendar_manager, mock_calendar
     ):
-        """Clearing DUE on a still-recurring task must NOT leave a dangling RRULE.
+        """Clearing DUE on a still-recurring task must PRESERVE the EXISTING
+        DTSTART anchor (not delete it, and NOT reset it to today).
 
-        Regression: previously the DTSTART-resync branch deleted DTSTART and
-        re-added nothing (because the cleared DUE has no value), producing an
-        RRULE with no anchor (an undefined VTODO). A recurring task must always
-        retain a valid DTSTART.
+        Regression (codex MAJOR #2): a recurring task's anchor lives in DTSTART;
+        clearing the user-facing "due" of a recurring task must keep that anchor
+        intact — the recurrence schedule does not change just because no separate
+        DUE is shown. Previously the resync branch re-anchored to today,
+        clobbering a valid existing anchor.
         """
         caldav_task = self._caldav_task(
             ["DUE:20260622T090000Z", "DTSTART:20260622T090000Z", "RRULE:FREQ=DAILY;COUNT=5"]
@@ -1507,10 +1574,56 @@ class TestUpdateTaskDateOnlyAndRecurrence:
         )
         ical = self._saved_ical(caldav_task)
         lines = ical.splitlines()
-        # DUE is gone, but RRULE survives and STILL has a DTSTART anchor.
+        # DUE is gone, but RRULE survives and the ORIGINAL DTSTART anchor is kept.
         assert not any(line.startswith("DUE") for line in lines)
         assert any(line.startswith("RRULE") for line in lines)
-        assert any(line.startswith("DTSTART") for line in lines)
+        dtstart_value = next(line.split(":", 1)[1] for line in lines if line.startswith("DTSTART"))
+        assert dtstart_value == "20260622T090000Z"
+
+    def test_update_recurring_task_without_touching_due_keeps_original_dtstart(
+        self, mock_calendar_manager, mock_calendar
+    ):
+        """Updating a recurring task WITHOUT touching due (and no new rule) must
+        leave the EXISTING DTSTART anchor untouched. Regression for codex
+        MAJOR #2."""
+        caldav_task = self._caldav_task(["DTSTART:20260101T090000Z", "RRULE:FREQ=WEEKLY;COUNT=5"])
+        # Only the summary changes; due/recurrence omitted.
+        self._run(
+            mock_calendar_manager,
+            mock_calendar,
+            caldav_task,
+            summary="Renamed but same schedule",
+        )
+        ical = self._saved_ical(caldav_task)
+        dtstart_value = next(
+            line.split(":", 1)[1] for line in ical.splitlines() if line.startswith("DTSTART")
+        )
+        assert dtstart_value == "20260101T090000Z"
+        assert any(line.startswith("RRULE") for line in ical.splitlines())
+
+    def test_changing_due_on_recurring_task_moves_dtstart_anchor(
+        self, mock_calendar_manager, mock_calendar
+    ):
+        """Changing the due of a recurring task MOVES the DTSTART anchor to the
+        new due value (the anchor IS the effective due). Regression for codex
+        MAJOR #2."""
+        caldav_task = self._caldav_task(
+            ["DUE:20260622T090000Z", "DTSTART:20260622T090000Z", "RRULE:FREQ=DAILY;COUNT=5"]
+        )
+        self._run(
+            mock_calendar_manager,
+            mock_calendar,
+            caldav_task,
+            due=datetime(2026, 7, 1, 8, 0, tzinfo=timezone.utc),
+        )
+        ical = self._saved_ical(caldav_task)
+        dtstart_value = next(
+            line.split(":", 1)[1] for line in ical.splitlines() if line.startswith("DTSTART")
+        )
+        assert dtstart_value == "20260701T080000Z"
+        # Equal DUE dropped (RFC 5545 §3.8.2.3); RRULE preserved.
+        assert not any(line.startswith("DUE") for line in ical.splitlines())
+        assert any(line.startswith("RRULE") for line in ical.splitlines())
 
     def test_update_due_without_all_day_preserves_date_only(
         self, mock_calendar_manager, mock_calendar
@@ -1797,3 +1910,45 @@ class TestParseCaldavTaskReadPath:
         assert result.due is not None
         # DUE (10:00), not DTSTART (09:00), drives the parsed value.
         assert result.due.astimezone(timezone.utc).hour == 10
+
+    def test_non_recurring_start_only_task_has_no_due(self, mock_calendar_manager):
+        """A NON-recurring start-only VTODO (DTSTART, no DUE, no RRULE) has NO
+        due: DTSTART is a START, not a due. The read path must NOT fall back to
+        DTSTART when there is no RRULE. Regression for codex MAJOR #1."""
+        mgr = TaskManager(mock_calendar_manager)
+        caldav_task = self._caldav_task(["DTSTART:20260622T090000Z"])
+        result = mgr._parse_caldav_task(
+            caldav_task, calendar_uid="cal-123", account_alias="test_account"
+        )
+        assert result is not None
+        assert result.due is None
+        assert result.all_day is False
+        assert result.recurrence_rule is None
+
+    def test_non_recurring_date_only_start_has_no_due(self, mock_calendar_manager):
+        """A NON-recurring date-only start-only VTODO (DTSTART;VALUE=DATE, no DUE,
+        no RRULE) likewise has no due and is NOT marked all_day. Regression for
+        codex MAJOR #1 — the DTSTART fallback is gated on the presence of an
+        RRULE."""
+        mgr = TaskManager(mock_calendar_manager)
+        caldav_task = self._caldav_task(["DTSTART;VALUE=DATE:20260622"])
+        result = mgr._parse_caldav_task(
+            caldav_task, calendar_uid="cal-123", account_alias="test_account"
+        )
+        assert result is not None
+        assert result.due is None
+        assert result.all_day is False
+
+    def test_recurring_start_only_task_reads_due_from_anchor(self, mock_calendar_manager):
+        """A RECURRING start-only VTODO (DTSTART + RRULE, no DUE) DOES read its
+        ``due`` from the DTSTART anchor — that anchor is the effective due.
+        Regression for codex MAJOR #1 (the kept behavior, now gated on RRULE)."""
+        mgr = TaskManager(mock_calendar_manager)
+        caldav_task = self._caldav_task(["DTSTART:20260622T090000Z", "RRULE:FREQ=WEEKLY;COUNT=5"])
+        result = mgr._parse_caldav_task(
+            caldav_task, calendar_uid="cal-123", account_alias="test_account"
+        )
+        assert result is not None
+        assert result.due is not None
+        assert result.due.astimezone(timezone.utc).hour == 9
+        assert result.due.astimezone(timezone.utc).date().isoformat() == "2026-06-22"
