@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from .exceptions import ErrorSanitizer
 from .logging_config import setup_logging
 from .models import TaskStatus
-from .utils import parse_datetime
+from .utils import _is_date_only, parse_datetime
 
 logger = setup_logging()
 
@@ -617,11 +617,17 @@ class BulkOperationManager:
                 if task.get("status"):
                     status = TaskStatus(task.get("status"))
 
-                # Parse due date if provided as string
+                # Parse due date if provided as string. Mirror the single-task
+                # tool layer: a bare YYYY-MM-DD due string (or an explicit
+                # all_day flag) is treated as date-only so the task is stored as
+                # DUE;VALUE=DATE rather than a phantom-timed datetime.
                 due_dt = None
+                effective_all_day = bool(task.get("all_day", False))
                 if task.get("due"):
                     due_value = task.get("due")
                     if isinstance(due_value, str):
+                        if _is_date_only(due_value):
+                            effective_all_day = True
                         due_dt = parse_datetime(due_value)
                     else:
                         due_dt = due_value
@@ -634,6 +640,8 @@ class BulkOperationManager:
                     priority=task.get("priority"),
                     status=status or TaskStatus.NEEDS_ACTION,
                     related_to=task.get("related_to", []),
+                    all_day=effective_all_day,
+                    recurrence_rule=task.get("recurrence_rule"),
                     account_alias=account_alias,
                 )
 

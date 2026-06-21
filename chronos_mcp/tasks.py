@@ -40,6 +40,55 @@ def _is_date_value(value: object) -> bool:
     return isinstance(dt, date) and not isinstance(dt, datetime)
 
 
+def _rrule_until_is_datetime(recurrence_rule: str) -> Optional[bool]:
+    """Inspect an RRULE string's ``UNTIL`` token and report its value-type.
+
+    Returns ``True`` when UNTIL is a DATE-TIME (``YYYYMMDDTHHMMSS[Z]``),
+    ``False`` when it is a DATE (``YYYYMMDD``), and ``None`` when the rule has
+    no UNTIL part. Used to enforce RFC 5545 §3.3.10: an RRULE's UNTIL value-type
+    MUST match the DTSTART/DUE anchor's value-type.
+    """
+    for part in recurrence_rule.split(";"):
+        key, _, value = part.partition("=")
+        if key.strip().upper() == "UNTIL":
+            return "T" in value.strip().upper()
+    return None
+
+
+def _validate_until_value_type(
+    recurrence_rule: str,
+    anchor: Union[date, datetime],
+    summary: str,
+    request_id: Optional[str],
+) -> None:
+    """Enforce RFC 5545 §3.3.10 UNTIL/anchor value-type consistency.
+
+    When the DTSTART anchor is a DATE (all-day), an RRULE ``UNTIL`` MUST also be
+    a DATE; when the anchor is a DATE-TIME, UNTIL MUST be a DATE-TIME. A mismatch
+    is rejected with a clear ``EventCreationError`` instructing the caller to
+    match the types (we validate rather than silently rewrite the rule).
+    """
+    until_is_datetime = _rrule_until_is_datetime(recurrence_rule)
+    if until_is_datetime is None:
+        return
+    anchor_is_date = _is_date_value(anchor)
+    if anchor_is_date and until_is_datetime:
+        raise EventCreationError(
+            summary,
+            "RRULE UNTIL must be a DATE (YYYYMMDD) for an all-day task whose "
+            "DTSTART/DUE is a date; got a DATE-TIME UNTIL. Match the value-types.",
+            request_id=request_id,
+        )
+    if (not anchor_is_date) and (not until_is_datetime):
+        raise EventCreationError(
+            summary,
+            "RRULE UNTIL must be a UTC DATE-TIME (YYYYMMDDTHHMMSSZ) for a timed "
+            "task whose DTSTART/DUE is a date-time; got a DATE UNTIL. Match the "
+            "value-types.",
+            request_id=request_id,
+        )
+
+
 def _anchor_for(
     due_value: Union[date, datetime, None],
     existing_due: Union[date, datetime, None],
@@ -133,7 +182,10 @@ class TaskManager:
                 # value (same value-type as DUE so DTSTART == DUE), or to
                 # today-in-default-tz when no due is provided. Never emit a
                 # DURATION (a VTODO must not carry both DUE and DURATION).
-                task.add("dtstart", _anchor_for(due_value, None, all_day))
+                anchor = _anchor_for(due_value, None, all_day)
+                # RFC 5545 §3.3.10: UNTIL value-type must match the anchor.
+                _validate_until_value_type(recurrence_rule, anchor, summary, request_id)
+                task.add("dtstart", anchor)
                 task.add("rrule", recurrence_rule)
             if priority is not None and 1 <= priority <= 9:
                 task.add("priority", priority)
@@ -174,11 +226,13 @@ class TaskManager:
                 summary=summary,
                 description=description,
                 due=due,
+                all_day=all_day,
                 completed=None,
                 priority=priority,
                 status=status,
                 percent_complete=0,
                 related_to=related_to or [],
+                recurrence_rule=recurrence_rule,
                 calendar_uid=calendar_uid,
                 account_alias=account_alias or self._get_default_account() or "default",
             )
@@ -450,6 +504,14 @@ class TaskManager:
             # non-empty = set/replace. RFC 5545 anchors a VTODO's RRULE to
             # DTSTART, so we keep DTSTART == DUE (same value-type, no DURATION).
             if recurrence_rule is not None:
+                # Capture the existing DTSTART anchor BEFORE deleting it so a
+                # rule change on a due-less task preserves its original schedule
+                # rather than re-anchoring to today (RFC 5545: RRULE anchors to
+                # DTSTART).
+                existing_dtstart_prop = existing_task.get("dtstart")
+                existing_dtstart_dt = (
+                    existing_dtstart_prop.dt if existing_dtstart_prop is not None else None
+                )
                 # Always remove any existing RRULE/DTSTART first so set and
                 # clear both start from a clean slate.
                 if "RRULE" in existing_task:
@@ -457,16 +519,25 @@ class TaskManager:
                 if "DTSTART" in existing_task:
                     del existing_task["DTSTART"]
                 if recurrence_rule:
-                    # Anchor DTSTART to the DUE value: the freshly-updated due
-                    # if provided, else the task's current DUE, else
+                    # Anchor precedence (preserve the original schedule across
+                    # rule changes): (a) the freshly-updated DUE if one was
+                    # provided, else (b) the task's EXISTING DTSTART anchor if
+                    # present, else (c) the task's current DUE, else (d)
                     # today-in-default-tz (matching its all_day-ness).
                     existing_due_prop = existing_task.get("due")
                     existing_due_dt = (
                         existing_due_prop.dt if existing_due_prop is not None else None
                     )
-                    existing_task.add(
-                        "DTSTART", _anchor_for(due_value, existing_due_dt, bool(all_day))
+                    anchor = _anchor_for(
+                        due_value,
+                        existing_dtstart_dt if existing_dtstart_dt is not None else existing_due_dt,
+                        bool(all_day),
                     )
+                    # RFC 5545 §3.3.10: UNTIL value-type must match the anchor.
+                    _validate_until_value_type(
+                        recurrence_rule, anchor, f"Task {task_uid}", request_id
+                    )
+                    existing_task.add("DTSTART", anchor)
                     existing_task.add("RRULE", recurrence_rule)
             elif due_updated and "RRULE" in existing_task:
                 # DUE changed on an already-recurring task and no new rule was

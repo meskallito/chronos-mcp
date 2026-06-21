@@ -1116,6 +1116,103 @@ class TestCreateTaskRecurrence:
         assert any(line.startswith("DTSTART") for line in ical.splitlines())
         assert any(line.startswith("RRULE") for line in ical.splitlines())
 
+    # ---- returned Task model carries all_day / recurrence_rule ------------
+
+    def test_returned_model_carries_all_day_for_date_only(
+        self, mock_calendar_manager, mock_calendar
+    ):
+        """create_task returns a Task with all_day=True for a date-only task so
+        the tool response renders a date-only DUE (no phantom T00:00:00)."""
+        mgr = TaskManager(mock_calendar_manager)
+        mock_calendar_manager.get_calendar.return_value = mock_calendar
+
+        result = mgr.create_task(
+            calendar_uid="cal-123",
+            summary="Date-only task",
+            due=datetime(2026, 6, 21, 0, 0, tzinfo=timezone.utc),
+            all_day=True,
+        )
+
+        assert result is not None
+        assert result.all_day is True
+
+    def test_returned_model_carries_recurrence_rule(self, mock_calendar_manager, mock_calendar):
+        """create_task returns a Task carrying the recurrence_rule so the tool
+        response reports it instead of None."""
+        mgr = TaskManager(mock_calendar_manager)
+        mock_calendar_manager.get_calendar.return_value = mock_calendar
+
+        result = mgr.create_task(
+            calendar_uid="cal-123",
+            summary="Recurring task",
+            due=datetime(2026, 6, 22, 9, 0, tzinfo=timezone.utc),
+            recurrence_rule="FREQ=WEEKLY;COUNT=10",
+        )
+
+        assert result is not None
+        assert result.recurrence_rule == "FREQ=WEEKLY;COUNT=10"
+
+    # ---- RFC 5545 §3.3.10 UNTIL/anchor value-type consistency -------------
+
+    def test_all_day_with_datetime_until_raises(self, mock_calendar_manager, mock_calendar):
+        """An all-day (DATE anchor) task with a DATE-TIME UNTIL is rejected."""
+        mgr = TaskManager(mock_calendar_manager)
+        mock_calendar_manager.get_calendar.return_value = mock_calendar
+
+        with pytest.raises(EventCreationError):
+            mgr.create_task(
+                calendar_uid="cal-123",
+                summary="Date-only recurring task",
+                due=datetime(2026, 6, 21, 0, 0, tzinfo=timezone.utc),
+                all_day=True,
+                recurrence_rule="FREQ=DAILY;UNTIL=20261231T000000Z",
+            )
+        mock_calendar.save_todo.assert_not_called()
+        mock_calendar.save_event.assert_not_called()
+
+    def test_all_day_with_date_until_ok(self, mock_calendar_manager, mock_calendar):
+        """An all-day (DATE anchor) task with a DATE UNTIL is accepted."""
+        mgr = TaskManager(mock_calendar_manager)
+        mock_calendar_manager.get_calendar.return_value = mock_calendar
+
+        mgr.create_task(
+            calendar_uid="cal-123",
+            summary="Date-only recurring task",
+            due=datetime(2026, 6, 21, 0, 0, tzinfo=timezone.utc),
+            all_day=True,
+            recurrence_rule="FREQ=DAILY;UNTIL=20261231",
+        )
+        ical = self._captured_ical(mock_calendar)
+        assert "UNTIL=20261231" in ical
+
+    def test_timed_with_datetime_until_ok(self, mock_calendar_manager, mock_calendar):
+        """A timed (DATE-TIME anchor) task with a DATE-TIME UNTIL is accepted."""
+        mgr = TaskManager(mock_calendar_manager)
+        mock_calendar_manager.get_calendar.return_value = mock_calendar
+
+        mgr.create_task(
+            calendar_uid="cal-123",
+            summary="Timed recurring task",
+            due=datetime(2026, 6, 22, 9, 0, tzinfo=timezone.utc),
+            recurrence_rule="FREQ=DAILY;UNTIL=20261231T000000Z",
+        )
+        ical = self._captured_ical(mock_calendar)
+        assert "UNTIL=20261231T000000Z" in ical
+
+    def test_timed_with_date_until_raises(self, mock_calendar_manager, mock_calendar):
+        """A timed (DATE-TIME anchor) task with a DATE UNTIL is rejected."""
+        mgr = TaskManager(mock_calendar_manager)
+        mock_calendar_manager.get_calendar.return_value = mock_calendar
+
+        with pytest.raises(EventCreationError):
+            mgr.create_task(
+                calendar_uid="cal-123",
+                summary="Timed recurring task",
+                due=datetime(2026, 6, 22, 9, 0, tzinfo=timezone.utc),
+                recurrence_rule="FREQ=DAILY;UNTIL=20261231",
+            )
+        mock_calendar.save_todo.assert_not_called()
+
 
 class TestUpdateTaskDateOnlyAndRecurrence:
     """Task 4: update_task parity — date-only DUE re-emit, default-tz, RRULE set/clear."""
@@ -1396,6 +1493,44 @@ class TestUpdateTaskDateOnlyAndRecurrence:
         due_line = next(line for line in ical.splitlines() if line.startswith("DUE"))
         assert "VALUE=DATE" not in due_line
         assert "20260625T093000" in due_line
+
+    def test_changing_rule_on_dueless_task_keeps_original_dtstart_anchor(
+        self, mock_calendar_manager, mock_calendar
+    ):
+        """A due-less recurring task whose RRULE is later changed must KEEP its
+        original DTSTART anchor (not re-anchor to today), preserving the
+        recurrence schedule. Regression for the codex review finding."""
+        # No DUE; DTSTART was anchored to the task's creation day.
+        caldav_task = self._caldav_task(["DTSTART:20260101T090000Z", "RRULE:FREQ=WEEKLY;COUNT=5"])
+        self._run(
+            mock_calendar_manager,
+            mock_calendar,
+            caldav_task,
+            recurrence_rule="FREQ=DAILY;COUNT=10",
+        )
+        ical = self._saved_ical(caldav_task)
+        # New rule applied...
+        assert any("FREQ=DAILY" in line for line in ical.splitlines() if line.startswith("RRULE"))
+        # ...but the original anchor is preserved (NOT today).
+        dtstart_value = next(
+            line.split(":", 1)[1] for line in ical.splitlines() if line.startswith("DTSTART")
+        )
+        assert "20260101T090000" in dtstart_value
+
+    def test_setting_rule_all_day_with_datetime_until_raises(
+        self, mock_calendar_manager, mock_calendar
+    ):
+        """Setting an RRULE with a DATE-TIME UNTIL on a date-only-anchored task
+        is rejected (RFC 5545 §3.3.10 value-type mismatch)."""
+        caldav_task = self._caldav_task(["DUE;VALUE=DATE:20260621"])
+        with pytest.raises(EventCreationError):
+            self._run(
+                mock_calendar_manager,
+                mock_calendar,
+                caldav_task,
+                recurrence_rule="FREQ=DAILY;UNTIL=20261231T000000Z",
+            )
+        caldav_task.save.assert_not_called()
 
 
 class TestParseCaldavTaskReadPath:

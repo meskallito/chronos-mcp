@@ -210,6 +210,62 @@ class TestBulkOperationManager:
         assert results[1].uid == "uid2"
 
 
+class TestBulkCreateTasksParity:
+    """bulk_create_tasks must reach feature-parity with the single-task tool:
+    bare-date dues become date-only, and recurrence_rule is passed through."""
+
+    def setup_method(self):
+        self.mock_task_manager = Mock()
+        created = Mock()
+        created.uid = "task-uid"
+        self.mock_task_manager.create_task.return_value = created
+        self.bulk_manager = BulkOperationManager(task_manager=self.mock_task_manager)
+
+    def test_bare_date_due_stored_date_only(self):
+        """A bulk item with a bare YYYY-MM-DD due ⇒ create_task called with
+        all_day=True (so it is stored DUE;VALUE=DATE, not phantom-timed)."""
+        tasks = [{"summary": "Date-only", "due": "2026-06-21"}]
+        result = self.bulk_manager.bulk_create_tasks(calendar_uid="cal123", tasks=tasks)
+
+        assert result.successful == 1
+        _, kwargs = self.mock_task_manager.create_task.call_args
+        assert kwargs["all_day"] is True
+        assert kwargs["due"].date().isoformat() == "2026-06-21"
+
+    def test_explicit_all_day_flag_honoured(self):
+        """A bulk item with all_day=True ⇒ create_task called with all_day=True."""
+        tasks = [{"summary": "Date-only", "due": "2026-06-21T00:00:00", "all_day": True}]
+        result = self.bulk_manager.bulk_create_tasks(calendar_uid="cal123", tasks=tasks)
+
+        assert result.successful == 1
+        _, kwargs = self.mock_task_manager.create_task.call_args
+        assert kwargs["all_day"] is True
+
+    def test_recurrence_rule_passed_through(self):
+        """A bulk item with recurrence_rule ⇒ create_task receives it (stored recurring)."""
+        tasks = [
+            {
+                "summary": "Recurring",
+                "due": "2026-06-22T09:00:00",
+                "recurrence_rule": "FREQ=WEEKLY;COUNT=10",
+            }
+        ]
+        result = self.bulk_manager.bulk_create_tasks(calendar_uid="cal123", tasks=tasks)
+
+        assert result.successful == 1
+        _, kwargs = self.mock_task_manager.create_task.call_args
+        assert kwargs["recurrence_rule"] == "FREQ=WEEKLY;COUNT=10"
+
+    def test_timed_due_not_marked_all_day(self):
+        """A bulk item with a timed due (with a T time) is NOT auto-marked all_day."""
+        tasks = [{"summary": "Timed", "due": "2026-06-22T09:00:00"}]
+        result = self.bulk_manager.bulk_create_tasks(calendar_uid="cal123", tasks=tasks)
+
+        assert result.successful == 1
+        _, kwargs = self.mock_task_manager.create_task.call_args
+        assert kwargs["all_day"] is False
+
+
 class TestBulkDelete:
     def setup_method(self):
         """Set up test fixtures"""

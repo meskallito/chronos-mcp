@@ -1374,3 +1374,68 @@ class TestTaskToolResponseSurfacing:
         assert result["task"]["all_day"] is True
         assert result["task"]["due"] == "2026-06-21"
         assert result["task"]["recurrence_rule"] == "FREQ=DAILY"
+
+    @pytest.mark.asyncio
+    async def test_create_date_only_real_manager_json_no_phantom_time(self, setup_managers):
+        """End-to-end with the REAL manager.create_task: a date-only create's
+        tool JSON reports all_day=True and a bare YYYY-MM-DD due (no phantom
+        T00:00:00). Regression for the codex finding — the manager's returned
+        Task must carry all_day, not just the mocked round-trip.
+        """
+        from chronos_mcp.tasks import TaskManager
+
+        mock_calendar_manager = Mock()
+        mock_calendar_manager.accounts.config.config.default_account = "test_account"
+        mock_calendar = Mock()
+        mock_calendar.save_todo = Mock()
+        mock_calendar.save_event = Mock()
+        mock_calendar_manager.get_calendar.return_value = mock_calendar
+
+        # Use the REAL create_task so the model construction is exercised.
+        setup_managers.create_task = TaskManager(mock_calendar_manager).create_task
+
+        created = await create_task.fn(
+            calendar_uid="cal-123",
+            summary="Date-only Task",
+            description=None,
+            due="2026-06-21",
+            priority=None,
+            status="NEEDS-ACTION",
+            related_to=None,
+            all_day=False,  # bare-date string auto-detects all_day
+            recurrence_rule=None,
+            account=None,
+        )
+        assert created["success"] is True
+        assert created["task"]["all_day"] is True
+        assert created["task"]["due"] == "2026-06-21"  # no phantom T00:00:00
+
+    @pytest.mark.asyncio
+    async def test_create_recurring_real_manager_json_carries_rule(self, setup_managers):
+        """End-to-end with the REAL manager.create_task: a recurring create's
+        tool JSON carries recurrence_rule (not None)."""
+        from chronos_mcp.tasks import TaskManager
+
+        mock_calendar_manager = Mock()
+        mock_calendar_manager.accounts.config.config.default_account = "test_account"
+        mock_calendar = Mock()
+        mock_calendar.save_todo = Mock()
+        mock_calendar.save_event = Mock()
+        mock_calendar_manager.get_calendar.return_value = mock_calendar
+
+        setup_managers.create_task = TaskManager(mock_calendar_manager).create_task
+
+        created = await create_task.fn(
+            calendar_uid="cal-123",
+            summary="Recurring Task",
+            description=None,
+            due="2026-06-22T09:00:00Z",
+            priority=None,
+            status="NEEDS-ACTION",
+            related_to=None,
+            all_day=False,
+            recurrence_rule="FREQ=WEEKLY;COUNT=10",
+            account=None,
+        )
+        assert created["success"] is True
+        assert created["task"]["recurrence_rule"] == "FREQ=WEEKLY;COUNT=10"
