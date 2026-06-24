@@ -442,36 +442,85 @@ class EventManager:
                 resolved_all_day = all_day
                 if resolved_all_day is None:
                     existing_dtstart = existing_event.get("dtstart")
-                    existing_dt = (
-                        existing_dtstart.dt if existing_dtstart is not None else None
-                    )
+                    existing_dt = existing_dtstart.dt if existing_dtstart is not None else None
                     resolved_all_day = isinstance(existing_dt, date) and not isinstance(
                         existing_dt, datetime
                     )
                     # A caller-supplied datetime with a non-midnight time
                     # component means the caller wants a timed slot.
                     for value in (start, end):
-                        if (
-                            isinstance(value, datetime)
-                            and (value.hour, value.minute, value.second, value.microsecond)
-                            != (0, 0, 0, 0)
-                        ):
+                        if isinstance(value, datetime) and (
+                            value.hour,
+                            value.minute,
+                            value.second,
+                            value.microsecond,
+                        ) != (0, 0, 0, 0):
                             resolved_all_day = False
                             break
 
-                # Re-add (delete-then-add) rather than mutating .dt in place so
-                # the property's existence AND its VALUE param are always correct
-                # (mirrors create_event), and so a DURATION-only event does not
-                # raise KeyError on a missing DTEND.
+                # A partial edit (only start or only end) leaves the OTHER
+                # endpoint untouched. If the resolved type differs from that
+                # untouched endpoint's existing value-type, the pair would mix a
+                # VALUE=DATE with a timed datetime — malformed iCal that strict
+                # CalDAV (Radicale/iCloud) rejects with 400. So when only one
+                # endpoint is supplied, pull the untouched one off the existing
+                # event and coerce it to the resolved type as well, guaranteeing
+                # DTSTART and DTEND always share a single value-type.
+                def _coerce(value: Any) -> Any:
+                    """Return a date (all-day) or a UTC-normalized datetime."""
+                    if resolved_all_day:
+                        # Normalize to UTC before taking the date so a near-midnight
+                        # tz-aware datetime lands on the correct calendar day.
+                        if isinstance(value, datetime):
+                            if value.tzinfo is not None and value.tzinfo != timezone.utc:
+                                value = value.astimezone(timezone.utc)
+                            return value.date()
+                        if isinstance(value, date):
+                            return value
+                        return value
+                    # Timed: ensure a datetime (promote a bare date to midnight UTC)
+                    # and normalize tz to UTC.
+                    if isinstance(value, datetime):
+                        if value.tzinfo is not None and value.tzinfo != timezone.utc:
+                            value = value.astimezone(timezone.utc)
+                        return value
+                    if isinstance(value, date):
+                        return datetime(value.year, value.month, value.day, tzinfo=timezone.utc)
+                    return value
+
+                # Resolve the value to write for each endpoint. A supplied value is
+                # used; an omitted one falls back to the existing property's value so
+                # a mismatched untouched endpoint gets re-coerced to the shared type.
+                existing_dtstart_prop = existing_event.get("dtstart")
+                existing_dtend_prop = existing_event.get("dtend")
+                existing_start_dt = (
+                    existing_dtstart_prop.dt if existing_dtstart_prop is not None else None
+                )
+                existing_end_dt = (
+                    existing_dtend_prop.dt if existing_dtend_prop is not None else None
+                )
+
+                def _type_of(dt: Any) -> Optional[bool]:
+                    """True=all-day(date), False=timed(datetime), None=absent."""
+                    if dt is None:
+                        return None
+                    return isinstance(dt, date) and not isinstance(dt, datetime)
+
+                # Re-add (delete-then-add) rather than mutating .dt in place so the
+                # property's existence AND its VALUE param are always correct
+                # (mirrors create_event), and so a DURATION-only event does not raise
+                # KeyError on a missing DTEND.
                 if start is not None:
                     if "dtstart" in existing_event:
                         del existing_event["dtstart"]
-                    if resolved_all_day:
-                        existing_event.add("dtstart", start.date())
-                    else:
-                        if start.tzinfo is not None and start.tzinfo != timezone.utc:
-                            start = start.astimezone(timezone.utc)
-                        existing_event.add("dtstart", start)
+                    existing_event.add("dtstart", _coerce(start))
+                elif (
+                    existing_start_dt is not None
+                    and _type_of(existing_start_dt) != resolved_all_day
+                ):
+                    # Untouched DTSTART has a mismatched value-type — coerce it.
+                    del existing_event["dtstart"]
+                    existing_event.add("dtstart", _coerce(existing_start_dt))
 
                 if end is not None:
                     if "dtend" in existing_event:
@@ -479,12 +528,12 @@ class EventManager:
                     # An explicit DTEND supersedes any existing DURATION.
                     if "duration" in existing_event:
                         del existing_event["duration"]
-                    if resolved_all_day:
-                        existing_event.add("dtend", end.date())
-                    else:
-                        if end.tzinfo is not None and end.tzinfo != timezone.utc:
-                            end = end.astimezone(timezone.utc)
-                        existing_event.add("dtend", end)
+                    existing_event.add("dtend", _coerce(end))
+                elif existing_end_dt is not None and _type_of(existing_end_dt) != resolved_all_day:
+                    # Untouched DTEND has a mismatched value-type — coerce it so the
+                    # DTSTART/DTEND pair shares one value-type.
+                    del existing_event["dtend"]
+                    existing_event.add("dtend", _coerce(existing_end_dt))
 
             if location is not None:
                 if location:

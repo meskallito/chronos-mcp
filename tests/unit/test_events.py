@@ -816,3 +816,218 @@ END:VEVENT"""
         saved = iCalendar.from_ical(raw)
         vevent = next(c for c in saved.walk() if c.name == "VEVENT")
         assert isinstance(vevent["last-modified"].dt, datetime)
+
+    def test_update_event_end_only_timed_on_allday_event(
+        self, mock_calendar_manager, mock_calendar
+    ):
+        """Regression (MAJOR): an end-only TIMED edit on an existing ALL-DAY event must
+        coerce the UNTOUCHED DTSTART to timed as well, so the pair never mixes a
+        VALUE=DATE DTSTART with a timed DTEND (the malformed shape strict CalDAV rejects)."""
+        from datetime import date
+
+        mock_calendar_manager.get_calendar.return_value = mock_calendar
+
+        mock_caldav_event = MagicMock()
+        cal = iCalendar()
+        event = iEvent()
+        event.add("uid", "evt-allday-end")
+        event.add("summary", "All Day")
+        event.add("dtstart", date(2026, 6, 23))  # VALUE=DATE
+        event.add("dtend", date(2026, 6, 24))  # VALUE=DATE
+        cal.add_component(event)
+
+        mock_caldav_event.data = cal.to_ical().decode("utf-8")
+        mock_calendar.event_by_uid.return_value = mock_caldav_event
+
+        mgr = EventManager(mock_calendar_manager)
+
+        # Only `end` supplied, with a time component -> resolves to timed.
+        mgr.update_event(
+            calendar_uid="cal-123",
+            event_uid="evt-allday-end",
+            end=datetime(2026, 6, 23, 15, 30, tzinfo=pytz.UTC),
+        )
+
+        mock_caldav_event.save.assert_called_once()
+
+        raw = mock_caldav_event.data
+        assert "VALUE=DATE" not in raw  # no stray VALUE=DATE on either endpoint
+
+        saved = iCalendar.from_ical(raw)
+        vevent = next(c for c in saved.walk() if c.name == "VEVENT")
+        # BOTH endpoints must be timed datetimes.
+        assert isinstance(vevent["dtstart"].dt, datetime)
+        assert isinstance(vevent["dtend"].dt, datetime)
+        # DTSTART coerced from the original 2026-06-23 date to midnight UTC.
+        assert vevent["dtstart"].dt == datetime(2026, 6, 23, 0, 0, tzinfo=pytz.UTC)
+        assert vevent["dtend"].dt == datetime(2026, 6, 23, 15, 30, tzinfo=pytz.UTC)
+
+    def test_update_event_start_only_timed_on_allday_event(
+        self, mock_calendar_manager, mock_calendar
+    ):
+        """Regression (MAJOR): a start-only TIMED edit on an existing ALL-DAY event must
+        coerce the UNTOUCHED DTEND to timed as well — no stray VALUE=DATE on DTEND."""
+        from datetime import date
+
+        mock_calendar_manager.get_calendar.return_value = mock_calendar
+
+        mock_caldav_event = MagicMock()
+        cal = iCalendar()
+        event = iEvent()
+        event.add("uid", "evt-allday-start")
+        event.add("summary", "All Day")
+        event.add("dtstart", date(2026, 6, 23))  # VALUE=DATE
+        event.add("dtend", date(2026, 6, 24))  # VALUE=DATE
+        cal.add_component(event)
+
+        mock_caldav_event.data = cal.to_ical().decode("utf-8")
+        mock_calendar.event_by_uid.return_value = mock_caldav_event
+
+        mgr = EventManager(mock_calendar_manager)
+
+        # Only `start` supplied, with a time component -> resolves to timed.
+        mgr.update_event(
+            calendar_uid="cal-123",
+            event_uid="evt-allday-start",
+            start=datetime(2026, 6, 23, 9, 0, tzinfo=pytz.UTC),
+        )
+
+        mock_caldav_event.save.assert_called_once()
+
+        raw = mock_caldav_event.data
+        assert "VALUE=DATE" not in raw  # no stray VALUE=DATE on either endpoint
+
+        saved = iCalendar.from_ical(raw)
+        vevent = next(c for c in saved.walk() if c.name == "VEVENT")
+        # BOTH endpoints must be timed datetimes.
+        assert isinstance(vevent["dtstart"].dt, datetime)
+        assert isinstance(vevent["dtend"].dt, datetime)
+        assert vevent["dtstart"].dt == datetime(2026, 6, 23, 9, 0, tzinfo=pytz.UTC)
+        # DTEND coerced from the original 2026-06-24 date to midnight UTC.
+        assert vevent["dtend"].dt == datetime(2026, 6, 24, 0, 0, tzinfo=pytz.UTC)
+
+    def test_update_event_explicit_all_day_true_on_timed_event(
+        self, mock_calendar_manager, mock_calendar
+    ):
+        """Caller-supplied all_day=True against a timed event makes BOTH DTSTART and
+        DTEND become VALUE=DATE dates (the caller-value-verbatim truth-table branch)."""
+        from datetime import date
+
+        mock_calendar_manager.get_calendar.return_value = mock_calendar
+
+        mock_caldav_event = MagicMock()
+        cal = iCalendar()
+        event = iEvent()
+        event.add("uid", "evt-timed-to-allday")
+        event.add("summary", "Timed")
+        event.add("dtstart", datetime(2026, 6, 23, 9, 0, tzinfo=pytz.UTC))
+        event.add("dtend", datetime(2026, 6, 23, 10, 0, tzinfo=pytz.UTC))
+        cal.add_component(event)
+
+        mock_caldav_event.data = cal.to_ical().decode("utf-8")
+        mock_calendar.event_by_uid.return_value = mock_caldav_event
+
+        mgr = EventManager(mock_calendar_manager)
+
+        mgr.update_event(
+            calendar_uid="cal-123",
+            event_uid="evt-timed-to-allday",
+            start=datetime(2026, 6, 23, 9, 0, tzinfo=pytz.UTC),
+            end=datetime(2026, 6, 24, 10, 0, tzinfo=pytz.UTC),
+            all_day=True,  # explicit -> verbatim, overrides the timed datetimes
+        )
+
+        mock_caldav_event.save.assert_called_once()
+
+        saved = iCalendar.from_ical(mock_caldav_event.data)
+        vevent = next(c for c in saved.walk() if c.name == "VEVENT")
+        # Both must be plain dates (all-day), not datetimes.
+        assert isinstance(vevent["dtstart"].dt, date)
+        assert not isinstance(vevent["dtstart"].dt, datetime)
+        assert isinstance(vevent["dtend"].dt, date)
+        assert not isinstance(vevent["dtend"].dt, datetime)
+        assert vevent["dtstart"].dt == date(2026, 6, 23)
+        assert vevent["dtend"].dt == date(2026, 6, 24)
+
+    def test_update_event_explicit_all_day_false_on_allday_event(
+        self, mock_calendar_manager, mock_calendar
+    ):
+        """Caller-supplied all_day=False against an all-day event makes BOTH DTSTART and
+        DTEND become timed datetimes."""
+        from datetime import date
+
+        mock_calendar_manager.get_calendar.return_value = mock_calendar
+
+        mock_caldav_event = MagicMock()
+        cal = iCalendar()
+        event = iEvent()
+        event.add("uid", "evt-allday-to-timed")
+        event.add("summary", "All Day")
+        event.add("dtstart", date(2026, 6, 23))
+        event.add("dtend", date(2026, 6, 24))
+        cal.add_component(event)
+
+        mock_caldav_event.data = cal.to_ical().decode("utf-8")
+        mock_calendar.event_by_uid.return_value = mock_caldav_event
+
+        mgr = EventManager(mock_calendar_manager)
+
+        mgr.update_event(
+            calendar_uid="cal-123",
+            event_uid="evt-allday-to-timed",
+            start=datetime(2026, 6, 23, 9, 0, tzinfo=pytz.UTC),
+            end=datetime(2026, 6, 23, 10, 0, tzinfo=pytz.UTC),
+            all_day=False,  # explicit timed
+        )
+
+        mock_caldav_event.save.assert_called_once()
+
+        raw = mock_caldav_event.data
+        assert "VALUE=DATE" not in raw
+
+        saved = iCalendar.from_ical(raw)
+        vevent = next(c for c in saved.walk() if c.name == "VEVENT")
+        assert isinstance(vevent["dtstart"].dt, datetime)
+        assert isinstance(vevent["dtend"].dt, datetime)
+
+    def test_update_event_midnight_utc_treated_as_allday(
+        self, mock_calendar_manager, mock_calendar
+    ):
+        """Boundary: a caller datetime at exactly 00:00:00 UTC (no all_day given) on an
+        all-day event is treated as all-day — the midnight override does NOT fire, so the
+        time is dropped and the event stays VALUE=DATE. Locks the documented behavior."""
+        from datetime import date
+
+        mock_calendar_manager.get_calendar.return_value = mock_calendar
+
+        mock_caldav_event = MagicMock()
+        cal = iCalendar()
+        event = iEvent()
+        event.add("uid", "evt-midnight")
+        event.add("summary", "All Day")
+        event.add("dtstart", date(2026, 6, 23))
+        event.add("dtend", date(2026, 6, 24))
+        cal.add_component(event)
+
+        mock_caldav_event.data = cal.to_ical().decode("utf-8")
+        mock_calendar.event_by_uid.return_value = mock_caldav_event
+
+        mgr = EventManager(mock_calendar_manager)
+
+        # Midnight-UTC start, all_day omitted -> stays all-day (time dropped).
+        mgr.update_event(
+            calendar_uid="cal-123",
+            event_uid="evt-midnight",
+            start=datetime(2026, 6, 25, 0, 0, 0, tzinfo=pytz.UTC),
+        )
+
+        mock_caldav_event.save.assert_called_once()
+
+        saved = iCalendar.from_ical(mock_caldav_event.data)
+        vevent = next(c for c in saved.walk() if c.name == "VEVENT")
+        # Both endpoints remain plain dates (all-day preserved).
+        assert isinstance(vevent["dtstart"].dt, date)
+        assert not isinstance(vevent["dtstart"].dt, datetime)
+        assert vevent["dtstart"].dt == date(2026, 6, 25)
+        assert isinstance(vevent["dtend"].dt, date)
+        assert not isinstance(vevent["dtend"].dt, datetime)
