@@ -534,8 +534,14 @@ class EventManager:
                     alarm.add("description", existing_event.get("summary", ""))
                     existing_event.add_component(alarm)
 
-            # Update last-modified timestamp
-            existing_event["last-modified"] = datetime.now(timezone.utc)
+            # Update last-modified timestamp. Use delete-then-add (NOT dict-set): a raw
+            # `existing_event["last-modified"] = datetime(...)` stores the bare datetime, which
+            # serializes via str() to "2026-06-24 01:35:17+00:00" (space + offset) — invalid
+            # iCal that strict CalDAV servers (Radicale, iCloud) reject with 400 Bad Request on
+            # PUT. `.add()` wraps it as a proper vDatetime -> "20260624T013517Z".
+            if "last-modified" in existing_event:
+                del existing_event["last-modified"]
+            existing_event.add("last-modified", datetime.now(timezone.utc))
 
             # Save the updated event
             caldav_event.data = ical.to_ical().decode("utf-8")

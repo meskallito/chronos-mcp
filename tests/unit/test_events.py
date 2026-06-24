@@ -773,3 +773,46 @@ END:VEVENT"""
         # DTEND re-added as the new timed value.
         assert isinstance(vevent["dtend"].dt, datetime)
         assert vevent["dtend"].dt == datetime(2026, 6, 23, 16, 30, tzinfo=pytz.UTC)
+
+    def test_update_event_last_modified_well_formed(self, mock_calendar_manager, mock_calendar):
+        """Regression: the updated event's LAST-MODIFIED must be a valid iCal UTC date-time
+        (e.g. 20260624T013517Z), NOT a bare Python datetime str ('2026-06-24 01:35:17+00:00').
+        The latter is what a dict-set `event["last-modified"] = datetime(...)` produces, and
+        strict CalDAV servers (Radicale, iCloud) reject it with 400 Bad Request on PUT."""
+        mock_calendar_manager.get_calendar.return_value = mock_calendar
+
+        mock_caldav_event = MagicMock()
+        cal = iCalendar()
+        event = iEvent()
+        event.add("uid", "evt-lastmod")
+        event.add("summary", "LastMod")
+        event.add("dtstart", datetime(2026, 6, 23, 9, 0, tzinfo=pytz.UTC))
+        event.add("dtend", datetime(2026, 6, 23, 10, 0, tzinfo=pytz.UTC))
+        cal.add_component(event)
+
+        mock_caldav_event.data = cal.to_ical().decode("utf-8")
+        mock_calendar.event_by_uid.return_value = mock_caldav_event
+
+        mgr = EventManager(mock_calendar_manager)
+
+        mgr.update_event(
+            calendar_uid="cal-123",
+            event_uid="evt-lastmod",
+            start=datetime(2026, 6, 23, 14, 30, tzinfo=pytz.UTC),
+            end=datetime(2026, 6, 23, 15, 30, tzinfo=pytz.UTC),
+        )
+
+        mock_caldav_event.save.assert_called_once()
+
+        raw = mock_caldav_event.data
+        # The malformed serialization carries a space + offset; the valid one is compact UTC.
+        lastmod_lines = [ln for ln in raw.splitlines() if ln.startswith("LAST-MODIFIED")]
+        assert lastmod_lines, "LAST-MODIFIED not present"
+        for ln in lastmod_lines:
+            assert " " not in ln, f"malformed LAST-MODIFIED (raw datetime str): {ln!r}"
+            assert "+00:00" not in ln, f"malformed LAST-MODIFIED (offset, not Z): {ln!r}"
+            assert ln.rstrip().endswith("Z"), f"LAST-MODIFIED not UTC Z-form: {ln!r}"
+        # And it re-parses cleanly as a datetime.
+        saved = iCalendar.from_ical(raw)
+        vevent = next(c for c in saved.walk() if c.name == "VEVENT")
+        assert isinstance(vevent["last-modified"].dt, datetime)
