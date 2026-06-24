@@ -658,6 +658,83 @@ END:VEVENT"""
         assert vevent["dtend"].dt == datetime(2026, 6, 23, 12, 30, tzinfo=pytz.UTC)
         assert vevent["dtstart"].dt == datetime(2026, 6, 23, 11, 0, tzinfo=pytz.UTC)
 
+    def test_update_event_duration_only_returns_event_not_none(
+        self, mock_calendar_manager, mock_calendar
+    ):
+        """Regression: a summary-only update on a DURATION-only event (no DTEND) must be
+        reported as SUCCESS. The event is mutated and saved, then _parse_caldav_event builds
+        the return value from data that still has no DTEND; previously ical_to_datetime(None)
+        raised TypeError, _parse_caldav_event returned None, and update_event falsely reported
+        failure despite the server-side mutation already happening."""
+        mock_calendar_manager.get_calendar.return_value = mock_calendar
+
+        mock_caldav_event = MagicMock()
+        cal = iCalendar()
+        event = iEvent()
+        event.add("uid", "evt-dur-only")
+        event.add("summary", "Duration Event")
+        event.add("dtstart", datetime(2026, 6, 23, 10, 0, tzinfo=pytz.UTC))
+        event.add("duration", timedelta(hours=2))  # DURATION, no DTEND
+        cal.add_component(event)
+
+        mock_caldav_event.data = cal.to_ical().decode("utf-8")
+        mock_calendar.event_by_uid.return_value = mock_caldav_event
+
+        mgr = EventManager(mock_calendar_manager)
+
+        # Summary-only update — does not touch the time window, so the saved
+        # event retains DURATION and still has no DTEND when parsed back.
+        result = mgr.update_event(
+            calendar_uid="cal-123",
+            event_uid="evt-dur-only",
+            summary="Renamed",
+        )
+
+        mock_caldav_event.save.assert_called_once()
+        # The fix: a non-None Event is returned (success, not false failure).
+        assert result is not None
+        assert result.summary == "Renamed"
+        # End is derived from DURATION: start + 2h.
+        assert result.start == datetime(2026, 6, 23, 10, 0, tzinfo=pytz.UTC)
+        assert result.end == datetime(2026, 6, 23, 12, 0, tzinfo=pytz.UTC)
+        assert result.all_day is False
+
+    def test_update_event_dtstart_only_returns_event_not_none(
+        self, mock_calendar_manager, mock_calendar
+    ):
+        """Regression: a summary-only update on a DTSTART-only event (no DTEND, no DURATION)
+        must be reported as SUCCESS. Per RFC 5545 a DATE-TIME DTSTART with no end implies a
+        zero-duration event, so _parse_caldav_event must derive end == start rather than crash."""
+        mock_calendar_manager.get_calendar.return_value = mock_calendar
+
+        mock_caldav_event = MagicMock()
+        cal = iCalendar()
+        event = iEvent()
+        event.add("uid", "evt-start-only")
+        event.add("summary", "Start Only Event")
+        event.add("dtstart", datetime(2026, 6, 23, 9, 0, tzinfo=pytz.UTC))
+        # No DTEND, no DURATION
+        cal.add_component(event)
+
+        mock_caldav_event.data = cal.to_ical().decode("utf-8")
+        mock_calendar.event_by_uid.return_value = mock_caldav_event
+
+        mgr = EventManager(mock_calendar_manager)
+
+        result = mgr.update_event(
+            calendar_uid="cal-123",
+            event_uid="evt-start-only",
+            summary="Renamed Start Only",
+        )
+
+        mock_caldav_event.save.assert_called_once()
+        assert result is not None
+        assert result.summary == "Renamed Start Only"
+        # Zero-duration: end derived to equal start.
+        assert result.start == datetime(2026, 6, 23, 9, 0, tzinfo=pytz.UTC)
+        assert result.end == result.start
+        assert result.all_day is False
+
     def test_update_event_allday_to_timed(self, mock_calendar_manager, mock_calendar):
         """Regression: updating an existing all-day event (DTSTART;VALUE=DATE) to a timed
         slot yields valid date-time DTSTART/DTEND with no stray VALUE=DATE param."""

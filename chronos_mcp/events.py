@@ -236,16 +236,39 @@ class EventManager:
                     # Parse date/time values
                     dtstart = component.get("dtstart")
                     dtend = component.get("dtend")
+                    duration = component.get("duration")
 
                     start_dt = ical_to_datetime(dtstart)
-                    end_dt = ical_to_datetime(dtend)
+
+                    # Determine whether DTSTART is DATE-valued (all-day) vs
+                    # DATE-TIME. RFC 5545 uses this to derive an absent end.
+                    start_is_date = hasattr(dtstart, "dt") and not hasattr(dtstart.dt, "hour")
+
+                    # Derive the end per RFC 5545 when DTEND is absent so that
+                    # DURATION-only and DTSTART-only events parse successfully
+                    # instead of crashing (ical_to_datetime(None) -> TypeError).
+                    if dtend is not None:
+                        end_dt = ical_to_datetime(dtend)
+                    elif duration is not None:
+                        # duration.dt is a timedelta
+                        end_dt = start_dt + duration.dt
+                    elif start_is_date:
+                        # DATE-valued DTSTART with no end => 1-day all-day event
+                        end_dt = start_dt + timedelta(days=1)
+                    else:
+                        # DATE-TIME DTSTART with no end => zero-duration event
+                        end_dt = start_dt
 
                     # Detect all-day events
                     # Check if values were DATE (not DATE-TIME) or midnight-to-midnight
                     is_all_day = False
+                    if start_is_date:
+                        # DATE-valued DTSTART is all-day regardless of how the
+                        # end was supplied (explicit DTEND, DURATION, or derived)
+                        is_all_day = True
                     if dtstart and dtend:
                         # Check if values are DATE type (no time component)
-                        if hasattr(dtstart, "dt") and not hasattr(dtstart.dt, "hour"):
+                        if start_is_date:
                             is_all_day = True
                         # Also check for midnight-to-midnight pattern
                         elif (
