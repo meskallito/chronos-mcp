@@ -1031,3 +1031,136 @@ END:VEVENT"""
         assert vevent["dtstart"].dt == date(2026, 6, 25)
         assert isinstance(vevent["dtend"].dt, date)
         assert not isinstance(vevent["dtend"].dt, datetime)
+
+    def test_update_event_duration_only_start_only_to_allday_drops_duration(
+        self, mock_calendar_manager, mock_calendar
+    ):
+        """Regression (MAJOR edge): a DURATION-only event (DTSTART + time-based DURATION,
+        NO DTEND) edited start-only and resolving to all-day must NOT leave a time-based
+        DURATION paired with a VALUE=DATE DTSTART — that mixed shape is invalid per
+        RFC 5545 and strict CalDAV (Radicale/iCloud) 400s it. The stale time-based
+        DURATION must be dropped (an all-day VEVENT with just DTSTART;VALUE=DATE is
+        valid and implies a one-day span)."""
+        from datetime import date
+
+        mock_calendar_manager.get_calendar.return_value = mock_calendar
+
+        mock_caldav_event = MagicMock()
+        cal = iCalendar()
+        event = iEvent()
+        event.add("uid", "evt-dur-allday")
+        event.add("summary", "Duration Only")
+        event.add("dtstart", datetime(2026, 6, 23, 9, 0, tzinfo=pytz.UTC))
+        event.add("duration", timedelta(hours=1))  # time-based PT1H, no DTEND
+        cal.add_component(event)
+
+        mock_caldav_event.data = cal.to_ical().decode("utf-8")
+        mock_calendar.event_by_uid.return_value = mock_caldav_event
+
+        mgr = EventManager(mock_calendar_manager)
+
+        # Start-only edit, end omitted, all_day forced True -> resolves to all-day.
+        mgr.update_event(
+            calendar_uid="cal-123",
+            event_uid="evt-dur-allday",
+            start=datetime(2026, 6, 25, 9, 0, tzinfo=pytz.UTC),
+            all_day=True,
+        )
+
+        mock_caldav_event.save.assert_called_once()
+
+        raw = mock_caldav_event.data
+        # The saved iCal must re-parse cleanly and carry no malformed mix.
+        saved = iCalendar.from_ical(raw)
+        vevent = next(c for c in saved.walk() if c.name == "VEVENT")
+
+        # DTSTART is VALUE=DATE (a plain date, not a datetime).
+        assert isinstance(vevent["dtstart"].dt, date)
+        assert not isinstance(vevent["dtstart"].dt, datetime)
+        assert vevent["dtstart"].dt == date(2026, 6, 25)
+
+        # The time-based DURATION is gone — no VALUE=DATE/timed-DURATION mix remains.
+        assert "duration" not in vevent
+        # No DTEND was fabricated out of thin air.
+        assert "dtend" not in vevent
+
+    def test_update_event_duration_only_baredate_start_drops_duration(
+        self, mock_calendar_manager, mock_calendar
+    ):
+        """Same MAJOR edge reached via inference: a DURATION-only event edited with a
+        bare ``date`` start (all_day omitted) infers all-day and must drop the stale
+        time-based DURATION."""
+        from datetime import date
+
+        mock_calendar_manager.get_calendar.return_value = mock_calendar
+
+        mock_caldav_event = MagicMock()
+        cal = iCalendar()
+        event = iEvent()
+        event.add("uid", "evt-dur-bare")
+        event.add("summary", "Duration Only Bare")
+        event.add("dtstart", date(2026, 6, 23))  # already all-day VALUE=DATE
+        event.add("duration", timedelta(hours=3))  # but a stale time-based DURATION
+        cal.add_component(event)
+
+        mock_caldav_event.data = cal.to_ical().decode("utf-8")
+        mock_calendar.event_by_uid.return_value = mock_caldav_event
+
+        mgr = EventManager(mock_calendar_manager)
+
+        # Bare-date start, all_day omitted -> inferred all-day from existing VALUE=DATE.
+        mgr.update_event(
+            calendar_uid="cal-123",
+            event_uid="evt-dur-bare",
+            start=date(2026, 6, 25),
+        )
+
+        mock_caldav_event.save.assert_called_once()
+
+        saved = iCalendar.from_ical(mock_caldav_event.data)
+        vevent = next(c for c in saved.walk() if c.name == "VEVENT")
+        assert isinstance(vevent["dtstart"].dt, date)
+        assert not isinstance(vevent["dtstart"].dt, datetime)
+        assert "duration" not in vevent
+        assert "dtend" not in vevent
+
+    def test_update_event_duration_only_to_timed_stays_coherent(
+        self, mock_calendar_manager, mock_calendar
+    ):
+        """A DURATION-only event edited to a timed start (resolves timed) must stay
+        coherent: DTSTART becomes a timed datetime and the time-based DURATION is left
+        intact (a timed DTSTART + time-based DURATION is a valid pairing)."""
+        mock_calendar_manager.get_calendar.return_value = mock_calendar
+
+        mock_caldav_event = MagicMock()
+        cal = iCalendar()
+        event = iEvent()
+        event.add("uid", "evt-dur-timed")
+        event.add("summary", "Duration Only Timed")
+        event.add("dtstart", datetime(2026, 6, 23, 9, 0, tzinfo=pytz.UTC))
+        event.add("duration", timedelta(hours=1))
+        cal.add_component(event)
+
+        mock_caldav_event.data = cal.to_ical().decode("utf-8")
+        mock_calendar.event_by_uid.return_value = mock_caldav_event
+
+        mgr = EventManager(mock_calendar_manager)
+
+        # Timed start (non-midnight) -> override keeps it timed.
+        mgr.update_event(
+            calendar_uid="cal-123",
+            event_uid="evt-dur-timed",
+            start=datetime(2026, 6, 25, 14, 30, tzinfo=pytz.UTC),
+        )
+
+        mock_caldav_event.save.assert_called_once()
+
+        raw = mock_caldav_event.data
+        assert "VALUE=DATE" not in raw  # DTSTART stayed timed
+        saved = iCalendar.from_ical(raw)
+        vevent = next(c for c in saved.walk() if c.name == "VEVENT")
+        assert isinstance(vevent["dtstart"].dt, datetime)
+        assert vevent["dtstart"].dt == datetime(2026, 6, 25, 14, 30, tzinfo=pytz.UTC)
+        # Time-based DURATION is valid alongside a timed DTSTART -> preserved.
+        assert "duration" in vevent
+        assert "dtend" not in vevent

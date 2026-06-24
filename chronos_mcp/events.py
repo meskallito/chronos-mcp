@@ -535,6 +535,24 @@ class EventManager:
                     del existing_event["dtend"]
                     existing_event.add("dtend", _coerce(existing_end_dt))
 
+                # Reconcile a surviving DURATION against the resolved value-type.
+                # The end branch above already drops DURATION whenever an explicit
+                # DTEND is supplied, but a DURATION-only event (DTSTART + DURATION,
+                # no DTEND) edited start-only can still resolve to all-day while its
+                # original time-based DURATION (e.g. PT1H) lingers. A VALUE=DATE
+                # DTSTART paired with a time-based DURATION is invalid per RFC 5545
+                # and strict CalDAV (Radicale/iCloud) rejects it with 400. So when
+                # the result is all-day, drop a time-based DURATION (one with any
+                # sub-day component); an all-day VEVENT with just DTSTART;VALUE=DATE
+                # is valid and implies a one-day span. A whole-day DURATION (P1D,
+                # P2W) is value-type-compatible with VALUE=DATE, so preserve it.
+                if resolved_all_day and "duration" in existing_event:
+                    duration_dt = existing_event["duration"].dt
+                    if isinstance(duration_dt, timedelta) and (
+                        duration_dt.seconds != 0 or duration_dt.microseconds != 0
+                    ):
+                        del existing_event["duration"]
+
             if location is not None:
                 if location:
                     existing_event["location"] = location
