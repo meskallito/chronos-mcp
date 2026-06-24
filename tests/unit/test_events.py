@@ -618,3 +618,158 @@ END:VEVENT"""
         assert "Invalid RRULE" in str(exc_info.value)
         # Verify save was NOT called due to validation failure
         mock_caldav_event.save.assert_not_called()
+
+    def test_update_event_duration_only_no_dtend(self, mock_calendar_manager, mock_calendar):
+        """Regression: updating start/end on an event that carries DURATION (no DTEND)
+        must NOT raise KeyError; the resulting event must have a well-formed DTEND and
+        the stale DURATION must be removed."""
+        mock_calendar_manager.get_calendar.return_value = mock_calendar
+
+        mock_caldav_event = MagicMock()
+        cal = iCalendar()
+        event = iEvent()
+        event.add("uid", "evt-dur")
+        event.add("summary", "Duration Event")
+        event.add("dtstart", datetime(2026, 6, 23, 10, 0, tzinfo=pytz.UTC))
+        event.add("duration", timedelta(hours=1))  # DURATION instead of DTEND
+        cal.add_component(event)
+
+        mock_caldav_event.data = cal.to_ical().decode("utf-8")
+        mock_calendar.event_by_uid.return_value = mock_caldav_event
+
+        mgr = EventManager(mock_calendar_manager)
+
+        # Edit the time window — supplies both start and end.
+        mgr.update_event(
+            calendar_uid="cal-123",
+            event_uid="evt-dur",
+            start=datetime(2026, 6, 23, 11, 0, tzinfo=pytz.UTC),
+            end=datetime(2026, 6, 23, 12, 30, tzinfo=pytz.UTC),
+        )
+
+        # No KeyError raised, save() called.
+        mock_caldav_event.save.assert_called_once()
+
+        # Re-parse and assert a well-formed DTEND, DURATION removed.
+        saved = iCalendar.from_ical(mock_caldav_event.data)
+        vevent = next(c for c in saved.walk() if c.name == "VEVENT")
+        assert "dtend" in vevent
+        assert "duration" not in vevent
+        assert vevent["dtend"].dt == datetime(2026, 6, 23, 12, 30, tzinfo=pytz.UTC)
+        assert vevent["dtstart"].dt == datetime(2026, 6, 23, 11, 0, tzinfo=pytz.UTC)
+
+    def test_update_event_allday_to_timed(self, mock_calendar_manager, mock_calendar):
+        """Regression: updating an existing all-day event (DTSTART;VALUE=DATE) to a timed
+        slot yields valid date-time DTSTART/DTEND with no stray VALUE=DATE param."""
+        from datetime import date
+
+        mock_calendar_manager.get_calendar.return_value = mock_calendar
+
+        mock_caldav_event = MagicMock()
+        cal = iCalendar()
+        event = iEvent()
+        event.add("uid", "evt-allday")
+        event.add("summary", "All Day")
+        event.add("dtstart", date(2026, 6, 23))  # VALUE=DATE
+        event.add("dtend", date(2026, 6, 24))
+        cal.add_component(event)
+
+        mock_caldav_event.data = cal.to_ical().decode("utf-8")
+        mock_calendar.event_by_uid.return_value = mock_caldav_event
+
+        mgr = EventManager(mock_calendar_manager)
+
+        # Caller supplies timed datetimes but omits all_day -> override to timed.
+        mgr.update_event(
+            calendar_uid="cal-123",
+            event_uid="evt-allday",
+            start=datetime(2026, 6, 23, 9, 0, tzinfo=pytz.UTC),
+            end=datetime(2026, 6, 23, 10, 0, tzinfo=pytz.UTC),
+        )
+
+        mock_caldav_event.save.assert_called_once()
+
+        # Raw ical must not carry VALUE=DATE on DTSTART/DTEND anymore.
+        raw = mock_caldav_event.data
+        assert "VALUE=DATE" not in raw
+
+        saved = iCalendar.from_ical(raw)
+        vevent = next(c for c in saved.walk() if c.name == "VEVENT")
+        assert isinstance(vevent["dtstart"].dt, datetime)
+        assert isinstance(vevent["dtend"].dt, datetime)
+        assert vevent["dtstart"].dt == datetime(2026, 6, 23, 9, 0, tzinfo=pytz.UTC)
+        assert vevent["dtend"].dt == datetime(2026, 6, 23, 10, 0, tzinfo=pytz.UTC)
+
+    def test_update_event_summary_only_preserves_duration(
+        self, mock_calendar_manager, mock_calendar
+    ):
+        """Regression: a summary-only update on a DURATION-only event must leave DURATION
+        intact and must NOT inject an accidental DTEND."""
+        mock_calendar_manager.get_calendar.return_value = mock_calendar
+
+        mock_caldav_event = MagicMock()
+        cal = iCalendar()
+        event = iEvent()
+        event.add("uid", "evt-dur2")
+        event.add("summary", "Original")
+        event.add("dtstart", datetime(2026, 6, 23, 10, 0, tzinfo=pytz.UTC))
+        event.add("duration", timedelta(hours=2))
+        cal.add_component(event)
+
+        mock_caldav_event.data = cal.to_ical().decode("utf-8")
+        mock_calendar.event_by_uid.return_value = mock_caldav_event
+
+        mgr = EventManager(mock_calendar_manager)
+
+        mgr.update_event(
+            calendar_uid="cal-123",
+            event_uid="evt-dur2",
+            summary="Renamed",
+        )
+
+        mock_caldav_event.save.assert_called_once()
+
+        saved = iCalendar.from_ical(mock_caldav_event.data)
+        vevent = next(c for c in saved.walk() if c.name == "VEVENT")
+        assert str(vevent["summary"]) == "Renamed"
+        assert "duration" in vevent  # DURATION preserved
+        assert "dtend" not in vevent  # no accidental DTEND
+
+    def test_update_event_end_only_on_timed_event(self, mock_calendar_manager, mock_calendar):
+        """Regression (truth-table end-only): updating only `end` (no `start`, all_day
+        omitted) on a timed event leaves DTSTART untouched and re-adds DTEND as a
+        matching timed value."""
+        mock_calendar_manager.get_calendar.return_value = mock_calendar
+
+        original_start = datetime(2026, 6, 23, 14, 0, tzinfo=pytz.UTC)
+
+        mock_caldav_event = MagicMock()
+        cal = iCalendar()
+        event = iEvent()
+        event.add("uid", "evt-timed")
+        event.add("summary", "Timed")
+        event.add("dtstart", original_start)
+        event.add("dtend", datetime(2026, 6, 23, 15, 0, tzinfo=pytz.UTC))
+        cal.add_component(event)
+
+        mock_caldav_event.data = cal.to_ical().decode("utf-8")
+        mock_calendar.event_by_uid.return_value = mock_caldav_event
+
+        mgr = EventManager(mock_calendar_manager)
+
+        mgr.update_event(
+            calendar_uid="cal-123",
+            event_uid="evt-timed",
+            end=datetime(2026, 6, 23, 16, 30, tzinfo=pytz.UTC),
+        )
+
+        mock_caldav_event.save.assert_called_once()
+
+        saved = iCalendar.from_ical(mock_caldav_event.data)
+        vevent = next(c for c in saved.walk() if c.name == "VEVENT")
+        # DTSTART untouched, still timed.
+        assert isinstance(vevent["dtstart"].dt, datetime)
+        assert vevent["dtstart"].dt == original_start
+        # DTEND re-added as the new timed value.
+        assert isinstance(vevent["dtend"].dt, datetime)
+        assert vevent["dtend"].dt == datetime(2026, 6, 23, 16, 30, tzinfo=pytz.UTC)

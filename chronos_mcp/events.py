@@ -3,7 +3,7 @@ Event operations for Chronos MCP
 """
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 import caldav  # type: ignore[import-untyped,import-not-found]
@@ -426,21 +426,65 @@ class EventManager:
                 elif "description" in existing_event:
                     del existing_event["description"]
 
-            if start is not None:
-                if all_day:
-                    existing_event["dtstart"].dt = start.date()
-                else:
-                    if start.tzinfo is not None and start.tzinfo != timezone.utc:
-                        start = start.astimezone(timezone.utc)
-                    existing_event["dtstart"].dt = start
+            if start is not None or end is not None:
+                # Resolve the effective all_day for BOTH re-added properties so a
+                # partial edit (only start or only end) cannot mix a VALUE=DATE
+                # DTSTART with a timed DTEND (or vice-versa).
+                #
+                # Truth table:
+                #   - all_day given by caller -> use it verbatim.
+                #   - all_day omitted (None) -> infer from the existing DTSTART
+                #     value-type (date vs datetime).
+                #   - override: a caller-supplied datetime carrying a time
+                #     component overrides inference toward timed, so editing an
+                #     all-day event to a specific clock time does not silently
+                #     drop the time.
+                resolved_all_day = all_day
+                if resolved_all_day is None:
+                    existing_dtstart = existing_event.get("dtstart")
+                    existing_dt = (
+                        existing_dtstart.dt if existing_dtstart is not None else None
+                    )
+                    resolved_all_day = isinstance(existing_dt, date) and not isinstance(
+                        existing_dt, datetime
+                    )
+                    # A caller-supplied datetime with a non-midnight time
+                    # component means the caller wants a timed slot.
+                    for value in (start, end):
+                        if (
+                            isinstance(value, datetime)
+                            and (value.hour, value.minute, value.second, value.microsecond)
+                            != (0, 0, 0, 0)
+                        ):
+                            resolved_all_day = False
+                            break
 
-            if end is not None:
-                if all_day:
-                    existing_event["dtend"].dt = end.date()
-                else:
-                    if end.tzinfo is not None and end.tzinfo != timezone.utc:
-                        end = end.astimezone(timezone.utc)
-                    existing_event["dtend"].dt = end
+                # Re-add (delete-then-add) rather than mutating .dt in place so
+                # the property's existence AND its VALUE param are always correct
+                # (mirrors create_event), and so a DURATION-only event does not
+                # raise KeyError on a missing DTEND.
+                if start is not None:
+                    if "dtstart" in existing_event:
+                        del existing_event["dtstart"]
+                    if resolved_all_day:
+                        existing_event.add("dtstart", start.date())
+                    else:
+                        if start.tzinfo is not None and start.tzinfo != timezone.utc:
+                            start = start.astimezone(timezone.utc)
+                        existing_event.add("dtstart", start)
+
+                if end is not None:
+                    if "dtend" in existing_event:
+                        del existing_event["dtend"]
+                    # An explicit DTEND supersedes any existing DURATION.
+                    if "duration" in existing_event:
+                        del existing_event["duration"]
+                    if resolved_all_day:
+                        existing_event.add("dtend", end.date())
+                    else:
+                        if end.tzinfo is not None and end.tzinfo != timezone.utc:
+                            end = end.astimezone(timezone.utc)
+                        existing_event.add("dtend", end)
 
             if location is not None:
                 if location:
